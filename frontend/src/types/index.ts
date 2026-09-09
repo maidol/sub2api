@@ -1340,6 +1340,26 @@ export interface AntigravityModelQuota {
   reset_time: string  // 重置时间 ISO8601
 }
 
+// Antigravity 单个模型的详细能力信息
+export interface AntigravityModelDetail {
+  display_name?: string
+  supports_images?: boolean | null
+  supports_thinking?: boolean | null
+  thinking_budget?: number | null
+  recommended?: boolean | null
+  max_tokens?: number | null
+  max_output_tokens?: number | null
+  supported_mime_types?: Record<string, boolean> | null
+}
+
+// Antigravity 家族共享池窗口（后端 antigravity_pools）
+export interface AntigravityPoolUsage {
+  pool: 'gemini' | 'claude_gpt'
+  five_hour?: UsageProgress | null
+  weekly?: UsageProgress | null
+  models?: string[]
+}
+
 export interface GrokQuotaWindow {
   limit?: number | null
   remaining?: number | null
@@ -1398,6 +1418,8 @@ export interface AccountUsageInfo {
   gemini_pro_minute?: UsageProgress | null
   gemini_flash_minute?: UsageProgress | null
   antigravity_quota?: Record<string, AntigravityModelQuota> | null
+  antigravity_pools?: AntigravityPoolUsage[] | null
+  antigravity_quota_details?: Record<string, AntigravityModelDetail> | null
   grok_request_quota?: GrokQuotaWindow | null
   grok_token_quota?: GrokQuotaWindow | null
   grok_retry_after_seconds?: number | null

@@ -166,6 +166,8 @@ func (f *AntigravityQuotaFetcher) buildUsageInfo(modelsResp *antigravity.FetchAv
 		info.AntigravityQuotaDetails[modelName] = detail
 	}
 
+	info.AntigravityPools = buildAntigravityPools(info.AntigravityQuota)
+
 	// 废弃模型转发规则
 	if len(modelsResp.DeprecatedModelIDs) > 0 {
 		info.ModelForwardingRules = make(map[string]string, len(modelsResp.DeprecatedModelIDs))

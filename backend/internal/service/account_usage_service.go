@@ -203,6 +203,9 @@ type UsageInfo struct {
 	// Antigravity 多模型配额
 	AntigravityQuota map[string]*AntigravityModelQuota `json:"antigravity_quota,omitempty"`
 
+	// Antigravity 家族共享池窗口（对齐客户端设置页的两组）
+	AntigravityPools []AntigravityPoolUsage `json:"antigravity_pools,omitempty"`
+
 	// Grok / xAI 被动额度快照
 	GrokRequestQuota       *xai.QuotaWindow `json:"grok_request_quota,omitempty"`
 	GrokTokenQuota         *xai.QuotaWindow `json:"grok_token_quota,omitempty"`
@@ -1095,9 +1098,7 @@ func (s *AccountUsageService) getAntigravityUsage(ctx context.Context, account *
 			ttl := antigravityCacheTTL(cache.usageInfo)
 			if time.Since(cache.timestamp) < ttl {
 				usage := cache.usageInfo
-				if usage.FiveHour != nil && usage.FiveHour.ResetsAt != nil {
-					usage.FiveHour.RemainingSeconds = int(time.Until(*usage.FiveHour.ResetsAt).Seconds())
-				}
+				recalcAntigravityRemainingSeconds(usage)
 				return usage, nil
 			}
 		}
@@ -1316,13 +1317,22 @@ func recalcAntigravityRemainingSeconds(info *UsageInfo) {
 	if info == nil {
 		return
 	}
-	if info.FiveHour != nil && info.FiveHour.ResetsAt != nil {
-		remaining := int(time.Until(*info.FiveHour.ResetsAt).Seconds())
-		if remaining < 0 {
-			remaining = 0
-		}
-		info.FiveHour.RemainingSeconds = remaining
+	recalcProgressRemaining(info.FiveHour)
+	for i := range info.AntigravityPools {
+		recalcProgressRemaining(info.AntigravityPools[i].FiveHour)
+		recalcProgressRemaining(info.AntigravityPools[i].Weekly)
 	}
+}
+
+func recalcProgressRemaining(p *UsageProgress) {
+	if p == nil || p.ResetsAt == nil {
+		return
+	}
+	remaining := int(time.Until(*p.ResetsAt).Seconds())
+	if remaining < 0 {
+		remaining = 0
+	}
+	p.RemainingSeconds = remaining
 }
 
 // antigravityCacheTTL 根据 UsageInfo 内容决定缓存 TTL

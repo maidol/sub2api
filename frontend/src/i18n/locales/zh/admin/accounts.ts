@@ -575,6 +575,12 @@ export default {
         personal: '个人版',
         unlimited: '无限制'
       },
+      antigravityPool: {
+        gemini: 'Gemini',
+        claudeGpt: 'Claude/GPT',
+        weekly: '周',
+        fiveHour: '5h'
+      },
       ineligibleWarning:
         '该账号无 Antigravity 使用权限，但仍能进行 API 转发。继续使用请自行承担风险。',
       forbidden: '已封禁',

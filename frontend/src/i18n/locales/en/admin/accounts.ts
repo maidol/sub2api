@@ -1657,6 +1657,12 @@ export default {
         personal: 'Personal',
         unlimited: 'Unlimited'
       },
+      antigravityPool: {
+        gemini: 'Gemini',
+        claudeGpt: 'Claude/GPT',
+        weekly: '7d',
+        fiveHour: '5h'
+      },
       ineligibleWarning:
         'This account is not eligible for Antigravity, but API forwarding still works. Use at your own risk.',
       forbidden: 'Forbidden',

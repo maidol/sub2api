@@ -316,7 +316,26 @@
         {{ error }}
       </div>
 
-      <!-- Usage data from API -->
+      <!-- Usage data from API：优先家族池，池不可用时回落到逐模型清单 -->
+      <div v-else-if="hasAntigravityPools" class="space-y-1">
+        <div class="space-y-1" data-test="antigravity-pools">
+          <UsageProgressBar
+            v-for="row in antigravityPoolRows"
+            :key="row.key"
+            :label="row.label"
+            :utilization="row.utilization"
+            :resets-at="row.resetsAt"
+            :color="row.color"
+            label-width="auto"
+          />
+        </div>
+
+        <div v-if="aiCreditsDisplay" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+          💳 {{ t('admin.accounts.aiCreditsBalance') }}: {{ aiCreditsDisplay }}
+        </div>
+      </div>
+
+      <!-- 回落：逐模型清单 -->
       <div v-else-if="hasAntigravityQuotaFromAPI" class="space-y-1">
         <!-- Gemini 3 Pro -->
         <UsageProgressBar
@@ -928,6 +947,53 @@ const antigravityClaudeUsageFromAPI = computed(() =>
     'claude-opus-4-7', 'claude-opus-4-8',
   ])
 )
+
+// ===== Antigravity 家族池（后端 antigravity_pools）=====
+// 后端只在同池内数值一致时才下发这个字段；不一致时它是空的，
+// 页面回落到下面的逐模型清单——那正是「per-model 配额不是家族池」的现场，
+// 不要为了"总得显示点什么"把回落删掉。
+const antigravityPools = computed(() => usageInfo.value?.antigravity_pools || [])
+const hasAntigravityPools = computed(() => antigravityPools.value.length > 0)
+
+const antigravityPoolRows = computed(() => {
+  const rows: Array<{
+    key: string
+    label: string
+    utilization: number
+    resetsAt: string | null
+    color: 'indigo' | 'amber'
+  }> = []
+
+  for (const pool of antigravityPools.value) {
+    const isGemini = pool.pool === 'gemini'
+    const poolLabel = isGemini
+      ? t('admin.accounts.antigravityPool.gemini')
+      : t('admin.accounts.antigravityPool.claudeGpt')
+    const color = isGemini ? 'indigo' : 'amber'
+
+    // 周在前、5h 在后，与 Antigravity 客户端设置页的行序一致。
+    // weekly 为 null/undefined 时整行不 push——不要 push 一个 utilization: 0 的行。
+    if (pool.weekly) {
+      rows.push({
+        key: `${pool.pool}-weekly`,
+        label: `${poolLabel} ${t('admin.accounts.antigravityPool.weekly')}`,
+        utilization: pool.weekly.utilization,
+        resetsAt: pool.weekly.resets_at ?? null,
+        color
+      })
+    }
+    if (pool.five_hour) {
+      rows.push({
+        key: `${pool.pool}-5h`,
+        label: `${poolLabel} ${t('admin.accounts.antigravityPool.fiveHour')}`,
+        utilization: pool.five_hour.utilization,
+        resetsAt: pool.five_hour.resets_at ?? null,
+        color
+      })
+    }
+  }
+  return rows
+})
 
 const aiCreditsDisplay = computed(() => {
   const credits = usageInfo.value?.ai_credits

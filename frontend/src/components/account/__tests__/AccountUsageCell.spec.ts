@@ -317,6 +317,141 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('25')
   })
 
+  it('Antigravity 家族池渲染（正向）：两池、weekly与five_hour都有值时渲染4条进度条且百分比正确', async () => {
+    getUsage.mockResolvedValue({
+      antigravity_pools: [
+        {
+          pool: 'gemini',
+          weekly: { utilization: 28, resets_at: '2026-03-15T10:00:00Z' },
+          five_hour: { utilization: 4, resets_at: '2026-03-09T12:00:00Z' },
+          models: ['gemini-2.5-pro', 'gemini-3.8-flash-tiered']
+        },
+        {
+          pool: 'claude_gpt',
+          weekly: { utilization: 59, resets_at: '2026-03-15T10:00:00Z' },
+          five_hour: { utilization: 0, resets_at: '2026-03-09T13:00:00Z' },
+          models: ['claude-sonnet-4', 'gpt-5.6']
+        }
+      ]
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 1003,
+          platform: 'antigravity',
+          type: 'oauth',
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const poolContainer = wrapper.find('[data-test="antigravity-pools"]')
+    expect(poolContainer.exists()).toBe(true)
+    const bars = poolContainer.findAll('.usage-bar')
+    expect(bars.length).toBe(4)
+
+    const text = wrapper.text()
+    expect(text).toContain('admin.accounts.antigravityPool.gemini admin.accounts.antigravityPool.weekly|28|2026-03-15T10:00:00Z')
+    expect(text).toContain('admin.accounts.antigravityPool.gemini admin.accounts.antigravityPool.fiveHour|4|2026-03-09T12:00:00Z')
+    expect(text).toContain('admin.accounts.antigravityPool.claudeGpt admin.accounts.antigravityPool.weekly|59|2026-03-15T10:00:00Z')
+    expect(text).toContain('admin.accounts.antigravityPool.claudeGpt admin.accounts.antigravityPool.fiveHour|0|2026-03-09T13:00:00Z')
+  })
+
+  it('Antigravity 家族池渲染（反向①）：weekly 为 null 时只有1行，且页面文本不出现 0%', async () => {
+    getUsage.mockResolvedValue({
+      antigravity_pools: [
+        {
+          pool: 'gemini',
+          weekly: null,
+          five_hour: { utilization: 4, resets_at: '2026-03-09T12:00:00Z' },
+          models: ['gemini-3.8-flash-tiered']
+        }
+      ]
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 1004,
+          platform: 'antigravity',
+          type: 'oauth',
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}%|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const poolContainer = wrapper.find('[data-test="antigravity-pools"]')
+    expect(poolContainer.exists()).toBe(true)
+    const bars = poolContainer.findAll('.usage-bar')
+    expect(bars.length).toBe(1)
+
+    const text = wrapper.text()
+    expect(text).toContain('admin.accounts.antigravityPool.gemini admin.accounts.antigravityPool.fiveHour|4%|2026-03-09T12:00:00Z')
+    expect(text).not.toContain('0%')
+  })
+
+  it('Antigravity 家族池渲染（反向②）：未下发 antigravity_pools 时回落到逐模型清单', async () => {
+    getUsage.mockResolvedValue({
+      antigravity_pools: [],
+      antigravity_quota: {
+        'gemini-3.8-flash-tiered': {
+          utilization: 12,
+          reset_time: '2026-03-09T12:00:00Z'
+        }
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 1005,
+          platform: 'antigravity',
+          type: 'oauth',
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="antigravity-pools"]').exists()).toBe(false)
+    const scrollContainer = wrapper.find('.max-h-36')
+    expect(scrollContainer.exists()).toBe(true)
+    expect(wrapper.text()).toContain('gemini-3.8-flash-tiered|12|2026-03-09T12:00:00Z')
+  })
+
 
   it('OpenAI OAuth 快照已过期时首屏会重新请求 usage', async () => {
     getUsage.mockResolvedValue({
