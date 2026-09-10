@@ -139,6 +139,60 @@ type PaidTierInfo struct {
 	AvailableCredits []AvailableCredit `json:"availableCredits,omitempty"`
 }
 
+// QuotaSummaryBucket 是 retrieveUserQuotaSummary 返回的一个配额桶。
+//
+// 已知 bucketId 字面量：gemini-5h / gemini-weekly / 3p-5h / 3p-weekly
+// （3p = third-party，即 Claude 与 GPT 那一组）。
+//
+// remainingFraction 有两种已观测到的形状：桶上的扁平字段，以及嵌在 remaining 下面。
+// 一律走 GetRemainingFraction 读取，不要直接读字段。
+type QuotaSummaryBucket struct {
+	BucketID          string   `json:"bucketId,omitempty"`
+	DisplayName       string   `json:"displayName,omitempty"`
+	Window            string   `json:"window,omitempty"`
+	ResetTime         string   `json:"resetTime,omitempty"`
+	Description       string   `json:"description,omitempty"`
+	RemainingFraction *float64 `json:"remainingFraction,omitempty"`
+
+	Remaining *struct {
+		RemainingFraction *float64 `json:"remainingFraction,omitempty"`
+	} `json:"remaining,omitempty"`
+}
+
+// GetRemainingFraction 返回剩余比例与「这个字段到底在不在」。
+//
+// 指针 + bool 是刻意的：上游没下发这个桶的数值，和上游说「剩 0」，
+// 是两件必须分开的事。用 float64 零值表示前者，页面上会显示成「已用满 100%」。
+func (b *QuotaSummaryBucket) GetRemainingFraction() (float64, bool) {
+	if b == nil {
+		return 0, false
+	}
+	if b.RemainingFraction != nil {
+		return *b.RemainingFraction, true
+	}
+	if b.Remaining != nil && b.Remaining.RemainingFraction != nil {
+		return *b.Remaining.RemainingFraction, true
+	}
+	return 0, false
+}
+
+// QuotaSummaryGroup 对应 Antigravity 设置页的一组：Gemini Models / Claude and GPT models。
+type QuotaSummaryGroup struct {
+	DisplayName string               `json:"displayName,omitempty"`
+	Description string               `json:"description,omitempty"`
+	Buckets     []QuotaSummaryBucket `json:"buckets,omitempty"`
+}
+
+// RetrieveUserQuotaSummaryRequest retrieveUserQuotaSummary 请求
+type RetrieveUserQuotaSummaryRequest struct {
+	Project string `json:"project,omitempty"`
+}
+
+// RetrieveUserQuotaSummaryResponse retrieveUserQuotaSummary 响应
+type RetrieveUserQuotaSummaryResponse struct {
+	Groups []QuotaSummaryGroup `json:"groups,omitempty"`
+}
+
 // UnmarshalJSON 兼容 paidTier 既可能是字符串也可能是对象的情况。
 func (p *PaidTierInfo) UnmarshalJSON(data []byte) error {
 	data = bytes.TrimSpace(data)
@@ -732,6 +786,75 @@ func (c *Client) FetchAvailableModels(ctx context.Context, accessToken, projectI
 		// 标记成功的 URL，下次优先使用
 		DefaultURLAvailability.MarkSuccess(baseURL)
 		return &modelsResp, rawResp, nil
+	}
+
+	return nil, nil, lastErr
+}
+
+// RetrieveUserQuotaSummary 获取按模型组分的配额摘要（每组含 5h 与 weekly 两个窗口），
+// 返回解析后的结构体和原始 JSON。这是 Antigravity 客户端设置页读的那一份数据；
+// fetchAvailableModels 只有 per-model 的 5h，没有周窗口。
+//
+// 支持 URL fallback：prod → daily，与 LoadCodeAssist 一致。
+func (c *Client) RetrieveUserQuotaSummary(ctx context.Context, accessToken, projectID string) (*RetrieveUserQuotaSummaryResponse, map[string]any, error) {
+	if c == nil || c.httpClient == nil {
+		return nil, nil, errors.New("antigravity client is not configured")
+	}
+
+	reqBody := RetrieveUserQuotaSummaryRequest{Project: projectID}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, nil, fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	availableURLs := BaseURLs
+	var lastErr error
+	for urlIdx, baseURL := range availableURLs {
+		apiURL := baseURL + "/v1internal:retrieveUserQuotaSummary"
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader(string(bodyBytes)))
+		if err != nil {
+			lastErr = fmt.Errorf("创建请求失败: %w", err)
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", GetUserAgentForContext(ctx))
+
+		resp, err := servertiming.Do(c.httpClient, req)
+		if err != nil {
+			lastErr = fmt.Errorf("retrieveUserQuotaSummary 请求失败: %w", err)
+			if shouldFallbackToNextURL(err, 0) && urlIdx < len(availableURLs)-1 {
+				log.Printf("[antigravity] retrieveUserQuotaSummary URL fallback: %s -> %s", baseURL, availableURLs[urlIdx+1])
+				continue
+			}
+			return nil, nil, lastErr
+		}
+
+		respBodyBytes, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, nil, fmt.Errorf("读取响应失败: %w", err)
+		}
+
+		if shouldFallbackToNextURL(nil, resp.StatusCode) && urlIdx < len(availableURLs)-1 {
+			log.Printf("[antigravity] retrieveUserQuotaSummary URL fallback (HTTP %d): %s -> %s", resp.StatusCode, baseURL, availableURLs[urlIdx+1])
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, nil, fmt.Errorf("retrieveUserQuotaSummary 失败 (HTTP %d): %s", resp.StatusCode, string(respBodyBytes))
+		}
+
+		var summary RetrieveUserQuotaSummaryResponse
+		if err := json.Unmarshal(respBodyBytes, &summary); err != nil {
+			return nil, nil, fmt.Errorf("响应解析失败: %w", err)
+		}
+
+		var rawResp map[string]any
+		_ = json.Unmarshal(respBodyBytes, &rawResp)
+
+		DefaultURLAvailability.MarkSuccess(baseURL)
+		return &summary, rawResp, nil
 	}
 
 	return nil, nil, lastErr

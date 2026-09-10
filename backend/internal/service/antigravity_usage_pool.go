@@ -1,14 +1,23 @@
 package service
 
 import (
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 )
 
 const (
 	antigravityPoolGemini    = "gemini"
 	antigravityPoolClaudeGPT = "claude_gpt"
+
+	antigravityWindowFiveHour = "5h"
+	antigravityWindowWeekly   = "weekly"
+
+	antigravityPoolSourceSummary  = "quota_summary"
+	antigravityPoolSourceInferred = "per_model_inferred"
 )
 
 // AntigravityPoolUsage 是一个家族共享池的窗口快照，对齐 Antigravity 客户端设置页的
@@ -106,4 +115,129 @@ func antigravityProgress(utilization float64, resetTime string) *UsageProgress {
 		p.RemainingSeconds = int(time.Until(t).Seconds())
 	}
 	return p
+}
+
+// buildAntigravityPoolsFromSummary 把 retrieveUserQuotaSummary 的 groups 直接转成两池两窗口。
+//
+// 这是权威来源：分组和分窗口都是上游自己给的，不需要像 buildAntigravityPools 那样
+// 从 per-model 数据反推。返回 nil 表示这份响应里一个能用的桶都没有——
+// 调用方此时必须保留反推出来的池，而不是把页面清空。
+func buildAntigravityPoolsFromSummary(summary *antigravity.RetrieveUserQuotaSummaryResponse) []AntigravityPoolUsage {
+	if summary == nil || len(summary.Groups) == 0 {
+		return nil
+	}
+
+	byPool := make(map[string]*AntigravityPoolUsage, 2)
+	for gi := range summary.Groups {
+		group := &summary.Groups[gi]
+		for bi := range group.Buckets {
+			bucket := &group.Buckets[bi]
+
+			// 没有这个字段 ≠ 剩 0。跳过，让那一行不渲染。
+			fraction, ok := bucket.GetRemainingFraction()
+			if !ok {
+				continue
+			}
+			pool := antigravitySummaryPool(group.DisplayName, bucket.BucketID)
+			if pool == "" {
+				continue
+			}
+			window := antigravitySummaryWindow(bucket.Window, bucket.BucketID)
+			if window == "" {
+				continue
+			}
+
+			entry := byPool[pool]
+			if entry == nil {
+				entry = &AntigravityPoolUsage{Pool: pool}
+				byPool[pool] = entry
+			}
+			// 这里不经过 int 截断：summary 给的是 float64，保留它。
+			progress := antigravityProgress((1.0-fraction)*100, bucket.ResetTime)
+			switch window {
+			case antigravityWindowFiveHour:
+				entry.FiveHour = progress
+			case antigravityWindowWeekly:
+				entry.Weekly = progress
+			}
+		}
+	}
+
+	// 顺序仍由固定数组给，理由同 buildAntigravityPools。
+	out := make([]AntigravityPoolUsage, 0, 2)
+	for _, pool := range []string{antigravityPoolGemini, antigravityPoolClaudeGPT} {
+		entry := byPool[pool]
+		if entry == nil || (entry.FiveHour == nil && entry.Weekly == nil) {
+			continue
+		}
+		out = append(out, *entry)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// antigravitySummaryPool 认组：先看 bucketId 前缀，再看 group 的 displayName。
+// 两个都不认识就返回 ""——宁可少画一个池，也不要把陌生的桶塞进已知的池里。
+func antigravitySummaryPool(groupDisplayName, bucketID string) string {
+	id := strings.ToLower(strings.TrimSpace(bucketID))
+	switch {
+	case strings.HasPrefix(id, "gemini"):
+		return antigravityPoolGemini
+	case strings.HasPrefix(id, "3p"), strings.HasPrefix(id, "claude"), strings.HasPrefix(id, "gpt"):
+		return antigravityPoolClaudeGPT
+	}
+
+	name := strings.ToLower(strings.TrimSpace(groupDisplayName))
+	switch {
+	case strings.Contains(name, "gemini"):
+		return antigravityPoolGemini
+	case strings.Contains(name, "claude"), strings.Contains(name, "gpt"):
+		return antigravityPoolClaudeGPT
+	}
+	return ""
+}
+
+// antigravitySummaryWindow 认窗口：window 字段优先，缺了就看 bucketId 后缀。
+func antigravitySummaryWindow(window, bucketID string) string {
+	switch strings.ToLower(strings.TrimSpace(window)) {
+	case "5h", "five_hour", "five-hour", "fivehour":
+		return antigravityWindowFiveHour
+	case "weekly", "week", "7d", "seven_day":
+		return antigravityWindowWeekly
+	}
+
+	id := strings.ToLower(strings.TrimSpace(bucketID))
+	switch {
+	case strings.HasSuffix(id, "-weekly"), strings.HasSuffix(id, "_weekly"):
+		return antigravityWindowWeekly
+	case strings.HasSuffix(id, "-5h"), strings.HasSuffix(id, "_5h"):
+		return antigravityWindowFiveHour
+	}
+	return ""
+}
+
+// logAntigravityPoolDivergence 在两个来源都拿到时比一次 5h 窗口。
+//
+// 「per-model 配额就是家族 5h 池」这个假设，在有权威来源之前没有裁判；现在有了。
+// 差超过 1 个百分点就是假设被推翻的现场——只记日志不改行为，因为权威那份本来就该赢。
+func logAntigravityPoolDivergence(inferred, authoritative []AntigravityPoolUsage) {
+	byPool := make(map[string]*UsageProgress, len(inferred))
+	for i := range inferred {
+		byPool[inferred[i].Pool] = inferred[i].FiveHour
+	}
+	for i := range authoritative {
+		a := authoritative[i].FiveHour
+		b := byPool[authoritative[i].Pool]
+		if a == nil || b == nil {
+			continue
+		}
+		if diff := a.Utilization - b.Utilization; diff > 1 || diff < -1 {
+			slog.Warn("antigravity pool 5h utilization diverges between sources",
+				"pool", authoritative[i].Pool,
+				"quota_summary", a.Utilization,
+				"per_model_inferred", b.Utilization)
+		}
+	}
 }

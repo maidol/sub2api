@@ -1419,6 +1419,7 @@ export interface AccountUsageInfo {
   gemini_flash_minute?: UsageProgress | null
   antigravity_quota?: Record<string, AntigravityModelQuota> | null
   antigravity_pools?: AntigravityPoolUsage[] | null
+  antigravity_pool_source?: 'quota_summary' | 'per_model_inferred' | null
   antigravity_quota_details?: Record<string, AntigravityModelDetail> | null
   grok_request_quota?: GrokQuotaWindow | null
   grok_token_quota?: GrokQuotaWindow | null

@@ -1,5 +1,9 @@
 //go:build e2e
 
+// 运行说明：
+// 在本机开发环境中，sub2api-app 容器端口通过 docker bridge 访问。
+// 运行示例：
+//   BASE_URL=http://172.17.0.8:8080 go test -tags=e2e -count=1 -v ./internal/integration/ -run TestAntigravityUsageE2E
 package integration
 
 import (
@@ -124,8 +128,9 @@ func TestAntigravityUsageE2E(t *testing.T) {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			AntigravityQuota map[string]any   `json:"antigravity_quota"`
-			AntigravityPools []map[string]any `json:"antigravity_pools"`
+			AntigravityQuota      map[string]any   `json:"antigravity_quota"`
+			AntigravityPools      []map[string]any `json:"antigravity_pools"`
+			AntigravityPoolSource string           `json:"antigravity_pool_source"`
 		} `json:"data"`
 	}
 
@@ -133,6 +138,7 @@ func TestAntigravityUsageE2E(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Logf("Response Code: %d, Message: %s", res.Code, res.Message)
+	t.Logf("AntigravityPoolSource: %s", res.Data.AntigravityPoolSource)
 	t.Logf("AntigravityQuota keys count: %d", len(res.Data.AntigravityQuota))
 	t.Logf("AntigravityPools count: %d", len(res.Data.AntigravityPools))
 
@@ -140,19 +146,61 @@ func TestAntigravityUsageE2E(t *testing.T) {
 		t.Logf("Pool #%d: %+v", i, pool)
 	}
 
-	// 验证结构体中 AntigravityPools 的解析契约
-	if len(res.Data.AntigravityPools) > 0 {
-		for _, p := range res.Data.AntigravityPools {
-			poolName, ok := p["pool"].(string)
-			require.True(t, ok)
-			require.Contains(t, []string{"gemini", "claude_gpt"}, poolName)
+	// 核心断言：不能在 pools 为空时通过，必须非空
+	require.NotEmpty(t, res.Data.AntigravityPools, "antigravity_pools 必须存在且非空（上游返回 quota keys: %d）", len(res.Data.AntigravityQuota))
 
-			if fh, ok := p["five_hour"].(map[string]any); ok && fh != nil {
-				require.Contains(t, fh, "utilization")
-				t.Logf("Pool %s FiveHour utilization: %v", poolName, fh["utilization"])
+	// 来源断言：在权威接口调通时应为 quota_summary
+	if res.Data.AntigravityPoolSource != "" {
+		require.Contains(t, []string{"quota_summary", "per_model_inferred"}, res.Data.AntigravityPoolSource)
+	}
+
+	var resetsAts []string
+	var weeklyCount int
+	for _, p := range res.Data.AntigravityPools {
+		poolName, ok := p["pool"].(string)
+		require.True(t, ok)
+		require.Contains(t, []string{"gemini", "claude_gpt"}, poolName)
+
+		// FiveHour 必须存在
+		fh, ok := p["five_hour"].(map[string]any)
+		require.True(t, ok, "pool %s 的 five_hour 必须非空", poolName)
+		require.Contains(t, fh, "utilization")
+
+		// Weekly 检查
+		if w, ok := p["weekly"].(map[string]any); ok && w != nil {
+			weeklyCount++
+			require.Contains(t, w, "utilization")
+			t.Logf("Pool %s Weekly utilization: %v", poolName, w["utilization"])
+		}
+
+		// 检查 resets_at 与 remaining_seconds 自洽性
+		if resetStr, ok := fh["resets_at"].(string); ok && resetStr != "" {
+			resetsAts = append(resetsAts, resetStr)
+			resetTime, err := time.Parse(time.RFC3339, resetStr)
+			require.NoError(t, err, "resets_at 必须是 RFC3339 格式: %s", resetStr)
+
+			if remSec, ok := fh["remaining_seconds"].(float64); ok {
+				expectedRem := int(time.Until(resetTime).Seconds())
+				if expectedRem < 0 {
+					expectedRem = 0
+				}
+				// 允许网络和执行延迟在 30 秒以内
+				require.InDelta(t, expectedRem, int(remSec), 30, "pool %s five_hour remaining_seconds 与 resets_at 必须自洽", poolName)
 			}
 		}
-	} else {
-		t.Logf("antigravity_pools 为空，说明上游模型额度不齐平或无数据，触发正常回落到逐模型清单")
+
+		// models 列表：在 per_model_inferred 模式下有 models
+		if models, ok := p["models"].([]any); ok && len(models) > 0 {
+			t.Logf("pool %s models count: %d", poolName, len(models))
+		}
+	}
+
+	if res.Data.AntigravityPoolSource == "quota_summary" {
+		require.Greater(t, weeklyCount, 0, "使用 quota_summary 时至少一个池有 weekly 窗口")
+	}
+
+	// 若两个池同时存在，记录两个家族池独立重置时刻
+	if len(res.Data.AntigravityPools) >= 2 && len(resetsAts) >= 2 {
+		t.Logf("Pool resets_at: pool0=%s, pool1=%s", resetsAts[0], resetsAts[1])
 	}
 }

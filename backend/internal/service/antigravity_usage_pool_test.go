@@ -4,6 +4,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -75,4 +76,57 @@ func TestBuildAntigravityPools_StableOrder(t *testing.T) {
 func TestBuildAntigravityPools_EmptyInput(t *testing.T) {
 	require.Nil(t, buildAntigravityPools(nil))
 	require.Nil(t, buildAntigravityPools(map[string]*AntigravityModelQuota{}))
+}
+
+func TestRecalcAntigravityRemainingSeconds(t *testing.T) {
+	future1 := time.Now().Add(1 * time.Hour)
+	future2 := time.Now().Add(2 * time.Hour)
+	past := time.Now().Add(-10 * time.Minute)
+
+	info := &UsageInfo{
+		FiveHour: &UsageProgress{
+			ResetsAt:         &future1,
+			RemainingSeconds: 9999, // 过期值
+		},
+		AntigravityPools: []AntigravityPoolUsage{
+			{
+				Pool: antigravityPoolGemini,
+				FiveHour: &UsageProgress{
+					ResetsAt:         &future1,
+					RemainingSeconds: 9999, // 过期值
+				},
+				Weekly: &UsageProgress{
+					ResetsAt:         &future2,
+					RemainingSeconds: 9999, // 过期值
+				},
+			},
+			{
+				Pool: antigravityPoolClaudeGPT,
+				FiveHour: &UsageProgress{
+					ResetsAt:         &past,
+					RemainingSeconds: 9999, // 已过期
+				},
+				Weekly: nil,
+			},
+		},
+	}
+
+	recalcAntigravityRemainingSeconds(info)
+
+	// info.FiveHour
+	require.InDelta(t, 3600, info.FiveHour.RemainingSeconds, 5)
+
+	// Gemini pool FiveHour and Weekly
+	require.InDelta(t, 3600, info.AntigravityPools[0].FiveHour.RemainingSeconds, 5)
+	require.InDelta(t, 7200, info.AntigravityPools[0].Weekly.RemainingSeconds, 5)
+
+	// Claude/GPT pool FiveHour (past should be clamped to 0)
+	require.Equal(t, 0, info.AntigravityPools[1].FiveHour.RemainingSeconds)
+	require.Nil(t, info.AntigravityPools[1].Weekly)
+
+	// nil safe check
+	require.NotPanics(t, func() {
+		recalcAntigravityRemainingSeconds(nil)
+		recalcAntigravityRemainingSeconds(&UsageInfo{})
+	})
 }

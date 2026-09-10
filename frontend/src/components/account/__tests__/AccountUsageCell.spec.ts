@@ -369,6 +369,43 @@ describe('AccountUsageCell', () => {
     expect(text).toContain('admin.accounts.antigravityPool.claudeGpt admin.accounts.antigravityPool.fiveHour|0|2026-03-09T13:00:00Z')
   })
 
+  it('Antigravity 家族池渲染：显示 pool_source title 提示', async () => {
+    getUsage.mockResolvedValue({
+      antigravity_pool_source: 'quota_summary',
+      antigravity_pools: [
+        {
+          pool: 'gemini',
+          weekly: { utilization: 28, resets_at: '2026-03-15T10:00:00Z' },
+          five_hour: { utilization: 4, resets_at: '2026-03-09T12:00:00Z' },
+          models: ['gemini-2.5-pro']
+        }
+      ]
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 10031,
+          platform: 'antigravity',
+          type: 'oauth',
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: true,
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const poolContainer = wrapper.find('[data-test="antigravity-pools"]')
+    expect(poolContainer.exists()).toBe(true)
+    expect(poolContainer.attributes('title')).toBe('Authoritative: retrieveUserQuotaSummary')
+  })
+
   it('Antigravity 家族池渲染（反向①）：weekly 为 null 时只有1行，且页面文本不出现 0%', async () => {
     getUsage.mockResolvedValue({
       antigravity_pools: [

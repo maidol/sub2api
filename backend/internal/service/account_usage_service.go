@@ -206,6 +206,12 @@ type UsageInfo struct {
 	// Antigravity 家族共享池窗口（对齐客户端设置页的两组）
 	AntigravityPools []AntigravityPoolUsage `json:"antigravity_pools,omitempty"`
 
+	// AntigravityPoolSource 记录上面那两个池是哪来的：
+	// quota_summary = 上游 retrieveUserQuotaSummary 给的（权威，含周窗口）；
+	// per_model_inferred = 从 per-model 配额反推的（只有 5h，且依赖同池齐平这个假设）。
+	// 两种来源在页面上长得一样，但可信度不同，排查时必须能分开。
+	AntigravityPoolSource string `json:"antigravity_pool_source,omitempty"`
+
 	// Grok / xAI 被动额度快照
 	GrokRequestQuota       *xai.QuotaWindow `json:"grok_request_quota,omitempty"`
 	GrokTokenQuota         *xai.QuotaWindow `json:"grok_token_quota,omitempty"`

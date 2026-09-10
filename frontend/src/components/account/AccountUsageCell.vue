@@ -318,7 +318,7 @@
 
       <!-- Usage data from API：优先家族池，池不可用时回落到逐模型清单 -->
       <div v-else-if="hasAntigravityPools" class="space-y-1">
-        <div class="space-y-1" data-test="antigravity-pools">
+        <div class="space-y-1" data-test="antigravity-pools" :title="antigravityPoolSourceTitle">
           <UsageProgressBar
             v-for="row in antigravityPoolRows"
             :key="row.key"
@@ -954,6 +954,16 @@ const antigravityClaudeUsageFromAPI = computed(() =>
 // 不要为了"总得显示点什么"把回落删掉。
 const antigravityPools = computed(() => usageInfo.value?.antigravity_pools || [])
 const hasAntigravityPools = computed(() => antigravityPools.value.length > 0)
+const antigravityPoolSource = computed(() => usageInfo.value?.antigravity_pool_source || null)
+const antigravityPoolSourceTitle = computed(() => {
+  if (antigravityPoolSource.value === 'quota_summary') {
+    return 'Authoritative: retrieveUserQuotaSummary'
+  }
+  if (antigravityPoolSource.value === 'per_model_inferred') {
+    return 'Inferred: per-model quota'
+  }
+  return undefined
+})
 
 const antigravityPoolRows = computed(() => {
   const rows: Array<{

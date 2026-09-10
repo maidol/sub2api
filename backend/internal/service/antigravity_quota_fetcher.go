@@ -83,8 +83,20 @@ func (f *AntigravityQuotaFetcher) FetchQuota(ctx context.Context, account *Accou
 	// 调用 LoadCodeAssist 获取订阅等级和 AI Credits 余额（非关键路径，失败不影响主流程）
 	tierRaw, tierNormalized, loadResp := f.fetchSubscriptionTier(ctx, client, accessToken)
 
+	// 获取按组分的配额摘要（含周窗口）。非关键路径：失败就退回 per-model 反推
+	summary, _, summaryErr := client.RetrieveUserQuotaSummary(ctx, accessToken, projectID)
+	if summaryErr != nil {
+		slog.Warn("failed to fetch antigravity quota summary", "error", summaryErr)
+	}
+
 	// 转换为 UsageInfo
 	usageInfo := f.buildUsageInfo(modelsResp, tierRaw, tierNormalized, loadResp)
+
+	if pools := buildAntigravityPoolsFromSummary(summary); len(pools) > 0 {
+		logAntigravityPoolDivergence(usageInfo.AntigravityPools, pools)
+		usageInfo.AntigravityPools = pools
+		usageInfo.AntigravityPoolSource = antigravityPoolSourceSummary
+	}
 
 	return &QuotaResult{
 		UsageInfo: usageInfo,
@@ -167,6 +179,9 @@ func (f *AntigravityQuotaFetcher) buildUsageInfo(modelsResp *antigravity.FetchAv
 	}
 
 	info.AntigravityPools = buildAntigravityPools(info.AntigravityQuota)
+	if len(info.AntigravityPools) > 0 {
+		info.AntigravityPoolSource = antigravityPoolSourceInferred
+	}
 
 	// 废弃模型转发规则
 	if len(modelsResp.DeprecatedModelIDs) > 0 {
@@ -181,16 +196,7 @@ func (f *AntigravityQuotaFetcher) buildUsageInfo(modelsResp *antigravity.FetchAv
 	for _, modelName := range priorityModels {
 		if modelInfo, ok := modelsResp.Models[modelName]; ok && modelInfo.QuotaInfo != nil {
 			utilization := (1.0 - modelInfo.QuotaInfo.RemainingFraction) * 100
-			progress := &UsageProgress{
-				Utilization: utilization,
-			}
-			if modelInfo.QuotaInfo.ResetTime != "" {
-				if resetTime, err := time.Parse(time.RFC3339, modelInfo.QuotaInfo.ResetTime); err == nil {
-					progress.ResetsAt = &resetTime
-					progress.RemainingSeconds = int(time.Until(resetTime).Seconds())
-				}
-			}
-			info.FiveHour = progress
+			info.FiveHour = antigravityProgress(utilization, modelInfo.QuotaInfo.ResetTime)
 			break
 		}
 	}
