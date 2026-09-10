@@ -1081,6 +1081,15 @@ type GatewayConfig struct {
 	// Gemini 账户切换最大次数（Gemini 平台单独配置，因 API 限制更严格）
 	MaxAccountSwitchesGemini int `mapstructure:"max_account_switches_gemini"`
 
+	// 单次请求内 failover 的总时间预算（秒），同时管住「同账号重试」与「换号」。
+	// 0 表示不设预算，保持既有行为。
+	//
+	// 存在的理由：既有预算是 (1+max_account_switches) × (1+同账号重试次数) 这个
+	// 乘积，乘积里没有一项是时间。上游 capacity shed（503 "servers are currently
+	// overloaded"）会强制开启同账号重试并走指数退避，实测单请求可达 200 秒以上，
+	// 长过客户端超时，表现为「卡住然后失败」。
+	FailoverDeadlineSeconds int `mapstructure:"failover_deadline_seconds"`
+
 	// Antigravity 429 fallback 限流时间（分钟），解析重置时间失败时使用
 	AntigravityFallbackCooldownMinutes int `mapstructure:"antigravity_fallback_cooldown_minutes"`
 
@@ -2386,6 +2395,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.failover_on_400", false)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
+	viper.SetDefault("gateway.failover_deadline_seconds", 0)
 	viper.SetDefault("gateway.force_codex_cli", false)
 	viper.SetDefault("gateway.disable_codex_identity_enforcement", false)
 	viper.SetDefault("gateway.disable_codex_originator_normalization", false)

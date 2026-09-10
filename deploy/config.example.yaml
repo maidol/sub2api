@@ -217,6 +217,12 @@ security:
 # 网关配置
 # =============================================================================
 gateway:
+  # 单次请求内 failover（同账号重试 + 换号）的总时间预算，单位秒。
+  # 0 = 不设预算（默认，行为与旧版一致）。
+  # 建议值 45~90：上游 capacity shed 时既有逻辑可能耗时 200 秒以上，
+  # 长过多数客户端的超时，表现为请求卡住后失败。
+  # 环境变量：GATEWAY_FAILOVER_DEADLINE_SECONDS
+  failover_deadline_seconds: 0
   # Timeout for waiting upstream response headers (seconds)
   # 等待上游响应头超时时间（秒）
   response_header_timeout: 600

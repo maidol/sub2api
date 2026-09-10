@@ -374,6 +374,15 @@ func NewOpenAIGatewayHandler(
 	}
 }
 
+// failoverDeadlineSeconds 返回配置的单请求 failover 时间预算（秒）。
+// cfg 缺失时返回 0，即不设预算。
+func (h *OpenAIGatewayHandler) failoverDeadlineSeconds() int {
+	if h == nil || h.cfg == nil {
+		return 0
+	}
+	return h.cfg.Gateway.FailoverDeadlineSeconds
+}
+
 // Responses handles OpenAI Responses API endpoint
 // POST /openai/v1/responses
 func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
@@ -617,6 +626,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	requireCompact := legacyCompact
 
 	maxAccountSwitches := h.maxAccountSwitches
+	failoverDeadline := failoverDeadlineFrom(time.Now(), h.failoverDeadlineSeconds())
 	switchCount := 0
 	firstOutputTimeoutSwitchCount := 0
 	profitVetoCount := 0
@@ -886,6 +896,17 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						return
 					}
 					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
+					// 请求级时间预算：一处检查同时管住同账号重试与换号。
+					if failoverBudgetExhausted(failoverDeadline) {
+						reqLog.Warn("openai.failover_budget_exhausted",
+							zap.Int64("account_id", account.ID),
+							zap.Int("upstream_status", failoverErr.StatusCode),
+							zap.Int("switch_count", switchCount),
+							zap.Int("deadline_seconds", h.failoverDeadlineSeconds()),
+						)
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}

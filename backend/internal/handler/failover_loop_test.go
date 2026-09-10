@@ -1040,3 +1040,30 @@ func TestFailoverClientGone(t *testing.T) {
 		require.False(t, failoverClientGone(nil))
 	})
 }
+
+func TestFailoverDeadlineFrom(t *testing.T) {
+	t.Run("零或负数不设预算", func(t *testing.T) {
+		require.True(t, failoverDeadlineFrom(time.Now(), 0).IsZero())
+		require.True(t, failoverDeadlineFrom(time.Now(), -1).IsZero())
+	})
+
+	t.Run("正数按秒换算", func(t *testing.T) {
+		start := time.Now()
+		require.WithinDuration(t, start.Add(60*time.Second), failoverDeadlineFrom(start, 60), time.Second)
+	})
+}
+
+func TestFailoverBudgetExhausted(t *testing.T) {
+	t.Run("未配置预算时恒为false", func(t *testing.T) {
+		// 这是默认路径：failover_deadline_seconds 未配置时行为必须零变化。
+		require.False(t, failoverBudgetExhausted(time.Time{}))
+	})
+
+	t.Run("预算未到期", func(t *testing.T) {
+		require.False(t, failoverBudgetExhausted(time.Now().Add(time.Minute)))
+	})
+
+	t.Run("预算已到期", func(t *testing.T) {
+		require.True(t, failoverBudgetExhausted(time.Now().Add(-time.Millisecond)))
+	})
+}

@@ -358,3 +358,20 @@ func sleepWithContext(ctx context.Context, d time.Duration) bool {
 		return true
 	}
 }
+
+// failoverDeadlineFrom 把配置的秒数换算成本次请求的 failover 截止时刻。
+// seconds <= 0 返回零值，表示本次请求不设预算。
+func failoverDeadlineFrom(startedAt time.Time, seconds int) time.Time {
+	if seconds <= 0 {
+		return time.Time{}
+	}
+	return startedAt.Add(time.Duration(seconds) * time.Second)
+}
+
+// failoverBudgetExhausted 报告本次请求的 failover 时间预算是否已用尽。
+//
+// 零值 deadline 表示未配置预算，恒返回 false —— 这是默认路径，
+// 保证 failover_deadline_seconds 未配置时行为与改动前逐字节相同。
+func failoverBudgetExhausted(deadline time.Time) bool {
+	return !deadline.IsZero() && !time.Now().Before(deadline)
+}

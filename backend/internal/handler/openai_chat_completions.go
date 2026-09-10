@@ -150,6 +150,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 
 	maxAccountSwitches := h.maxAccountSwitches
+	failoverDeadline := failoverDeadlineFrom(time.Now(), h.failoverDeadlineSeconds())
 	switchCount := 0
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
@@ -334,6 +335,19 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
+					// 请求级时间预算：一处检查同时管住同账号重试与换号。
+					// 放在 ShouldRetryNextAccount 之后、同账号重试之前，
+					// 保证「不该重试的错误」仍按原路径终止，预算只裁剪重试本身。
+					if failoverBudgetExhausted(failoverDeadline) {
+						reqLog.Warn("openai_chat_completions.failover_budget_exhausted",
+							zap.Int64("account_id", account.ID),
+							zap.Int("upstream_status", failoverErr.StatusCode),
+							zap.Int("switch_count", switchCount),
+							zap.Int("deadline_seconds", h.failoverDeadlineSeconds()),
+						)
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
