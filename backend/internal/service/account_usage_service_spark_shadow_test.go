@@ -49,6 +49,50 @@ func (r *sparkShadowUsageTestRepo) UpdateExtra(_ context.Context, _ int64, updat
 // B) (P1-b regression guard) The UsageInfo RETURNED by the same call has
 // non-nil FiveHour AND SevenDay windows — proving that the rebuild happened
 // and not just the DB write.
+func TestGetOpenAIUsage_FreeOAuth_UsesTopLevelRateLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	free := &Account{
+		ID:       300,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"access_token":       "free-access-token",
+			"chatgpt_account_id": "org-free",
+			"plan_type":          "free",
+		},
+	}
+	repo := &sparkShadowUsageTestRepo{accounts: map[int64]*Account{300: free}}
+	tokenCache := &stubQuotaTokenCache{tokens: map[string]string{OpenAITokenCacheKey(free): "free-access-token"}}
+	tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		resp := OpenAIQuotaUsage{RateLimit: &OpenAIRateLimit{
+			PrimaryWindow: &OpenAIRateLimitWindow{
+				UsedPercent: 42.5, ResetAfterSeconds: 3600, LimitWindowSeconds: 18000,
+			},
+			SecondaryWindow: &OpenAIRateLimitWindow{
+				UsedPercent: 10, ResetAfterSeconds: 86400, LimitWindowSeconds: 604800,
+			},
+		}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	quotaService := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	svc := &AccountUsageService{accountRepo: repo, openAIQuotaService: quotaService}
+
+	usage, err := svc.getOpenAIUsage(ctx, free, true)
+	require.NoError(t, err)
+	require.NotNil(t, usage.FiveHour, "free OAuth must expose the top-level 5h rate-limit window")
+	require.NotNil(t, usage.SevenDay, "free OAuth must expose the top-level 7d rate-limit window")
+	require.InDelta(t, 42.5, usage.FiveHour.Utilization, 0.01)
+	require.InDelta(t, 10, usage.SevenDay.Utilization, 0.01)
+}
+
 func TestGetOpenAIUsage_SparkShadow_WritesExtraAndReturnsNonEmptyWindows(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

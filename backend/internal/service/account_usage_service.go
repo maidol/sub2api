@@ -737,6 +737,21 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 					}
 				}
 			}
+		} else if isOpenAIFreeOAuth(account) && s.openAIQuotaService != nil {
+			// Free OAuth accounts expose Codex windows in the top-level rate_limit
+			// response from /wham/usage. Keep this separate from Spark's
+			// codex_bengalfox channel and from the /responses header probe used by
+			// subscribed or unknown-plan accounts.
+			if quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID); err == nil {
+				if updates := buildOpenAIAutoResetUsageUpdates(quotaUsage, now); len(updates) > 0 {
+					mergeAccountExtra(account, updates)
+					s.persistOpenAICodexProbeSnapshot(account.ID, updates)
+					if usage.UpdatedAt == nil {
+						usage.UpdatedAt = &now
+					}
+					applyExtraToUsage(usage, account.Extra, now)
+				}
+			}
 		} else {
 			if updates, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && len(updates) > 0 {
 				mergeAccountExtra(account, updates)
@@ -769,6 +784,13 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	return usage, nil
 }
 
+func isOpenAIFreeOAuth(account *Account) bool {
+	if account == nil || !account.IsOpenAIOAuth() || account.IsShadow() {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(account.GetCredential("plan_type")), "free")
+}
+
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {
 	if account == nil {
 		return false
@@ -793,7 +815,7 @@ func isOpenAICodexSnapshotStale(account *Account, now time.Time) bool {
 	// (/wham/usage body 的 codex_bengalfox),与 WSv2 无关——不能用 WSv2 门控其 staleness,否则首刷后
 	// codex_5h/7d 已存在→staleness 恒 false→spark 窗口永久冻结(外审第9轮 P1)。影子改按
 	// codex_usage_updated_at TTL 判定;实际查询频率仍由 shouldProbeOpenAICodexSnapshot 的缓存 TTL 节流。
-	if !account.IsShadow() && !account.IsOpenAIResponsesWebSocketV2Enabled() {
+	if !account.IsShadow() && !isOpenAIFreeOAuth(account) && !account.IsOpenAIResponsesWebSocketV2Enabled() {
 		return false
 	}
 	if account.Extra == nil {

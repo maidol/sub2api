@@ -589,6 +589,37 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('5h|18|900')
   })
 
+  it('OpenAI OAuth 没有窗口数据时仍可主动查询 usage', async () => {
+    getUsage.mockResolvedValue(null)
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 2005,
+          platform: 'openai',
+          type: 'oauth',
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          AccountQuotaInfo: true,
+          OpenAIQuotaResetCell: {
+            props: ['account'],
+            template: '<div><slot name="pre-actions" /></div>'
+          }
+        }
+      }
+    })
+
+    await flushPromises()
+    const activeQuery = wrapper.get('[data-test="openai-active-usage-query"]')
+    await activeQuery.trigger('click')
+    await flushPromises()
+
+    expect(getUsage).toHaveBeenLastCalledWith(2005, 'active', true)
+  })
+
   it('OpenAI OAuth 在无 codex 快照时会回退显示 usage 接口窗口', async () => {
 	getUsage.mockResolvedValue({
 	  five_hour: {
