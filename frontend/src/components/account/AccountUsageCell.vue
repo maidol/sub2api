@@ -121,7 +121,7 @@
       <div v-if="hasOpenAIUsageFallback" class="space-y-1">
         <UsageProgressBar
           v-if="usageInfo?.five_hour"
-          label="5h"
+          :label="codexWindowLabel(usageInfo.five_hour, '5h')"
           :utilization="usageInfo.five_hour.utilization"
           :resets-at="usageInfo.five_hour.resets_at"
           :window-stats="usageInfo.five_hour.window_stats"
@@ -130,7 +130,7 @@
         />
         <UsageProgressBar
           v-if="usageInfo?.seven_day"
-          label="7d"
+          :label="codexWindowLabel(usageInfo.seven_day, '7d')"
           :utilization="usageInfo.seven_day.utilization"
           :resets-at="usageInfo.seven_day.resets_at"
           :window-stats="usageInfo.seven_day.window_stats"
@@ -720,6 +720,18 @@ const emit = defineEmits<{
   'account-updated': [account: Account]
   'usage-loaded': [usage: AccountUsageInfo]
 }>()
+
+// Codex's 5h/7d fields are slots; display the actual upstream window duration.
+function codexWindowLabel(
+  progress: { window_minutes?: number } | null | undefined,
+  fallback: string,
+): string {
+  const minutes = progress?.window_minutes ?? 0
+  if (minutes <= 0) return fallback
+  if (minutes < 60) return `${minutes}m`
+  if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h`
+  return `${Math.round(minutes / (60 * 24))}d`
+}
 
 const { t } = useI18n()
 const desktopViewportQuery = '(min-width: 768px)'

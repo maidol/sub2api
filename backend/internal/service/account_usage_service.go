@@ -152,6 +152,9 @@ type UsageProgress struct {
 	WindowStats      *WindowStats `json:"window_stats,omitempty"` // 窗口期统计（从窗口开始到当前的使用量）
 	UsedRequests     int64        `json:"used_requests,omitempty"`
 	LimitRequests    int64        `json:"limit_requests,omitempty"`
+	// WindowMinutes is the upstream-declared real window length in minutes.
+	// Codex's 5h/7d fields are slots; the actual length is plan-dependent.
+	WindowMinutes int `json:"window_minutes,omitempty"`
 }
 
 // AntigravityModelQuota Antigravity 单个模型的配额信息
@@ -1532,9 +1535,10 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 	}
 
 	var (
-		usedPercentKey string
-		resetAfterKey  string
-		resetAtKey     string
+		usedPercentKey  string
+		resetAfterKey   string
+		resetAtKey      string
+		windowMinuteKey string
 	)
 
 	switch window {
@@ -1542,10 +1546,12 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 		usedPercentKey = "codex_5h_used_percent"
 		resetAfterKey = "codex_5h_reset_after_seconds"
 		resetAtKey = "codex_5h_reset_at"
+		windowMinuteKey = "codex_5h_window_minutes"
 	case "7d":
 		usedPercentKey = "codex_7d_used_percent"
 		resetAfterKey = "codex_7d_reset_after_seconds"
 		resetAtKey = "codex_7d_reset_at"
+		windowMinuteKey = "codex_7d_window_minutes"
 	default:
 		return nil
 	}
@@ -1556,6 +1562,9 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 	}
 
 	progress := &UsageProgress{Utilization: parseExtraFloat64(usedRaw)}
+	if windowMinutes := parseExtraInt(extra[windowMinuteKey]); windowMinutes > 0 {
+		progress.WindowMinutes = windowMinutes
+	}
 	if resetAtRaw, ok := extra[resetAtKey]; ok {
 		if resetAt, err := parseTime(fmt.Sprint(resetAtRaw)); err == nil {
 			progress.ResetsAt = &resetAt
@@ -1590,9 +1599,18 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 	return progress
 }
 
+// codexWindowStatsStart calculates the local usage-statistics window start.
+// The upstream-declared duration takes precedence over the nominal 5h/7d slot;
+// if it would place the start in the future, fall back to the nominal duration.
 func codexWindowStatsStart(progress *UsageProgress, fallbackWindow time.Duration, now time.Time) time.Time {
 	if progress != nil && progress.ResetsAt != nil && now.Before(*progress.ResetsAt) {
-		return progress.ResetsAt.Add(-fallbackWindow)
+		window := fallbackWindow
+		if progress.WindowMinutes > 0 {
+			window = time.Duration(progress.WindowMinutes) * time.Minute
+		}
+		if start := progress.ResetsAt.Add(-window); !start.After(now) {
+			return start
+		}
 	}
 	return now.Add(-fallbackWindow)
 }

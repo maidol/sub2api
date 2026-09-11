@@ -162,9 +162,14 @@ func (s *OpenAICodexUsageSnapshot) Normalize() *NormalizedCodexLimits {
 		primaryMins = *s.PrimaryWindowMinutes
 		hasPrimaryWindow = true
 	}
+	secondaryWindowExplicitlyEmpty := false
 	if s.SecondaryWindowMinutes != nil {
-		secondaryMins = *s.SecondaryWindowMinutes
-		hasSecondaryWindow = true
+		if *s.SecondaryWindowMinutes > 0 {
+			secondaryMins = *s.SecondaryWindowMinutes
+			hasSecondaryWindow = true
+		} else {
+			secondaryWindowExplicitlyEmpty = true
+		}
 	}
 
 	// Determine mapping based on window_minutes
@@ -206,14 +211,20 @@ func (s *OpenAICodexUsageSnapshot) Normalize() *NormalizedCodexLimits {
 		result.Window5hMinutes = s.PrimaryWindowMinutes
 		result.Used7dPercent = s.SecondaryUsedPercent
 		result.Reset7dSeconds = s.SecondaryResetAfterSeconds
-		result.Window7dMinutes = s.SecondaryWindowMinutes
+		if !secondaryWindowExplicitlyEmpty {
+			result.Used7dPercent = s.SecondaryUsedPercent
+			result.Reset7dSeconds = s.SecondaryResetAfterSeconds
+			result.Window7dMinutes = s.SecondaryWindowMinutes
+		}
 	} else if use7dFromPrimary {
 		result.Used7dPercent = s.PrimaryUsedPercent
 		result.Reset7dSeconds = s.PrimaryResetAfterSeconds
 		result.Window7dMinutes = s.PrimaryWindowMinutes
-		result.Used5hPercent = s.SecondaryUsedPercent
-		result.Reset5hSeconds = s.SecondaryResetAfterSeconds
-		result.Window5hMinutes = s.SecondaryWindowMinutes
+		if !secondaryWindowExplicitlyEmpty {
+			result.Used5hPercent = s.SecondaryUsedPercent
+			result.Reset5hSeconds = s.SecondaryResetAfterSeconds
+			result.Window5hMinutes = s.SecondaryWindowMinutes
+		}
 	}
 
 	return result
