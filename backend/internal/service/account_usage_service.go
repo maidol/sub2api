@@ -723,7 +723,11 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 			// parent account.  The result is written to the shadow row's own codex_*
 			// Extra keys and immediately reflected in the returned UsageInfo.
 			if s.openAIQuotaService != nil {
-				if quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID); err == nil {
+				quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID)
+				if err != nil {
+					slog.Warn("openai_usage.shadow_query_failed",
+						"account_id", account.ID, "error", err)
+				} else {
 					if updates := buildCodexSparkWindowExtraUpdates(quotaUsage, now); len(updates) > 0 {
 						mergeAccountExtra(account, updates)
 						s.persistOpenAICodexProbeSnapshot(account.ID, updates)
@@ -734,6 +738,8 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 							usage.UpdatedAt = &now
 						}
 						applyExtraToUsage(usage, account.Extra, now)
+					} else {
+						slog.Warn("openai_usage.shadow_query_empty", "account_id", account.ID)
 					}
 				}
 			}
@@ -742,7 +748,11 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 			// response from /wham/usage. Keep this separate from Spark's
 			// codex_bengalfox channel and from the /responses header probe used by
 			// subscribed or unknown-plan accounts.
-			if quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID); err == nil {
+			quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID)
+			if err != nil {
+				slog.Warn("openai_usage.free_oauth_query_failed",
+					"account_id", account.ID, "error", err)
+			} else {
 				if updates := buildOpenAIAutoResetUsageUpdates(quotaUsage, now); len(updates) > 0 {
 					mergeAccountExtra(account, updates)
 					s.persistOpenAICodexProbeSnapshot(account.ID, updates)
@@ -750,10 +760,21 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 						usage.UpdatedAt = &now
 					}
 					applyExtraToUsage(usage, account.Extra, now)
+				} else {
+					slog.Warn("openai_usage.free_oauth_query_empty", "account_id", account.ID)
 				}
 			}
 		} else {
-			if updates, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && len(updates) > 0 {
+			updates, err := s.probeOpenAICodexSnapshot(ctx, account)
+			if err != nil {
+				// 探针硬编码 chatgpt.com/backend-api/codex/responses,不读账号 base_url,
+				// 只认账号的 proxy。走三方中转的账号在这里必然失败——
+				// 这条日志是区分「守卫没放开」和「放开了但打不通上游」的唯一线索。
+				slog.Warn("openai_usage.codex_probe_failed",
+					"account_id", account.ID, "error", err)
+			} else if len(updates) == 0 {
+				slog.Warn("openai_usage.codex_probe_empty", "account_id", account.ID)
+			} else {
 				mergeAccountExtra(account, updates)
 				if usage.UpdatedAt == nil {
 					usage.UpdatedAt = &now
@@ -811,13 +832,18 @@ func isOpenAICodexSnapshotStale(account *Account, now time.Time) bool {
 	if account == nil || !account.IsOpenAIOAuth() {
 		return false
 	}
-	// 普通账号的 codex 刷新走 probe(/responses 头),要求 WSv2;但 spark 影子走 QueryUsage
-	// (/wham/usage body 的 codex_bengalfox),与 WSv2 无关——不能用 WSv2 门控其 staleness,否则首刷后
-	// codex_5h/7d 已存在→staleness 恒 false→spark 窗口永久冻结(外审第9轮 P1)。影子改按
-	// codex_usage_updated_at TTL 判定;实际查询频率仍由 shouldProbeOpenAICodexSnapshot 的缓存 TTL 节流。
-	if !account.IsShadow() && !isOpenAIFreeOAuth(account) && !account.IsOpenAIResponsesWebSocketV2Enabled() {
-		return false
-	}
+	// staleness 只回答「这份快照过期了没有」,不回答「该走哪条路刷新」——后者由
+	// getOpenAIUsage 的分支决定。两件事曾被写在一起:用 WSv2 门控 staleness,
+	// 于是首刷之后 codex_5h/7d 已存在 → staleness 恒 false → 窗口永久冻结。
+	//
+	// 这个坑修过两次,每次都是往白名单里再加一类:
+	//   外审第9轮 P1 —— spark 影子(走 /wham/usage bengalfox 道,与 WSv2 无关);
+	//   a9673af88   —— free OAuth(走 /wham/usage 顶层 rate_limit)。
+	// 而普通订阅 / 未知套餐的 OAuth 账号一直漏在白名单外,是同一个 bug 的第三次。
+	// 白名单补两次还在补,说明白名单本身就是错的形状,现在一律按 TTL 判定。
+	//
+	// 放开之后不会造成请求放大:实际查询频率仍由 shouldProbeOpenAICodexSnapshot
+	// 的 10 分钟缓存(openAIProbeCacheTTL)节流,且只在有人读用量时才触发。
 	if account.Extra == nil {
 		return true
 	}

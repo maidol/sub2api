@@ -104,14 +104,27 @@ func TestShouldRefreshOpenAICodexSnapshot_SparkShadowIgnoresWSv2(t *testing.T) {
 		t.Fatal("expected fresh spark shadow to skip refresh (TTL not elapsed)")
 	}
 
-	// 反向对照:普通账号无 WSv2 + 过期时间戳→仍不刷(WSv2 门控普通账号的 probe 刷新)。
+	// 普通账号(非影子、非 free、无 WSv2)+ 过期时间戳 → 必须刷新。
+	// 这里原本断言的是「不刷新」,那条断言把 bug 钉住了:staleness 被 WSv2
+	// 白名单门控,首刷之后窗口永久冻结。
 	normalNoWS := &Account{
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Extra:    map[string]any{"codex_usage_updated_at": staleAt},
 	}
-	if shouldRefreshOpenAICodexSnapshot(normalNoWS, usage, now) {
-		t.Fatal("expected non-WSv2 normal account to skip codex probe refresh")
+	if !shouldRefreshOpenAICodexSnapshot(normalNoWS, usage, now) {
+		t.Fatal("expected stale normal OAuth account (no WSv2, not free) to trigger refresh")
+	}
+
+	// 反向对照:同样是普通账号,时间戳新鲜 → 不刷新(TTL 仍然生效)。
+	// 缺了这一半,上面那条断言用「永远返回 true」也能过。
+	normalFresh := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"codex_usage_updated_at": freshAt},
+	}
+	if shouldRefreshOpenAICodexSnapshot(normalFresh, usage, now) {
+		t.Fatal("expected fresh normal OAuth account to skip refresh (TTL not elapsed)")
 	}
 }
 
@@ -255,4 +268,86 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 			t.Fatalf("expected Utilization=0 for expired 7d window, got %v", progress.Utilization)
 		}
 	})
+}
+
+// TestIsOpenAICodexSnapshotStale_AllOAuthShapesUseTTL 钉住 staleness 与「走哪条路刷新」
+// 的分离:无论影子 / free / WSv2,判定一律落在 codex_usage_updated_at 的 TTL 上。
+// 这是同一个 bug 第三次出现之后加的守卫——前两次(spark 影子、free OAuth)都是
+// 往白名单里加一类,加完下一类照样冻结。
+func TestIsOpenAICodexSnapshotStale_AllOAuthShapesUseTTL(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	staleAt := now.Add(-(openAIProbeCacheTTL + time.Minute)).Format(time.RFC3339)
+	freshAt := now.Add(-time.Minute).Format(time.RFC3339)
+	parentID := int64(9001)
+
+	mk := func(planType string, wsv2 bool, shadow bool, updatedAt string) *Account {
+		a := &Account{
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Credentials: map[string]any{"access_token": "t"},
+			Extra:       map[string]any{"codex_usage_updated_at": updatedAt},
+		}
+		if planType != "" {
+			a.Credentials["plan_type"] = planType
+		}
+		if wsv2 {
+			a.Extra["openai_oauth_responses_websockets_v2_enabled"] = true
+		}
+		if shadow {
+			a.ParentAccountID = &parentID
+			a.QuotaDimension = QuotaDimensionSpark
+		}
+		return a
+	}
+
+	cases := []struct {
+		name string
+		acc  *Account
+		want bool
+	}{
+		// 过期 → 一律 stale。第三类(plus / pro / 空 plan_type)就是本次修的。
+		{"plus 无WSv2 过期", mk("plus", false, false, staleAt), true},
+		{"pro 无WSv2 过期", mk("pro", false, false, staleAt), true},
+		{"空plan 无WSv2 过期", mk("", false, false, staleAt), true},
+		{"free 无WSv2 过期", mk("free", false, false, staleAt), true},
+		{"plus 开WSv2 过期", mk("plus", true, false, staleAt), true},
+		{"影子 过期", mk("", false, true, staleAt), true},
+
+		// 新鲜 → 一律不 stale。缺这一半,上面那半用「永远 true」也能过。
+		{"plus 无WSv2 新鲜", mk("plus", false, false, freshAt), false},
+		{"空plan 无WSv2 新鲜", mk("", false, false, freshAt), false},
+		{"free 无WSv2 新鲜", mk("free", false, false, freshAt), false},
+		{"影子 新鲜", mk("", false, true, freshAt), false},
+	}
+
+	for _, c := range cases {
+		if got := isOpenAICodexSnapshotStale(c.acc, now); got != c.want {
+			t.Errorf("%s: isOpenAICodexSnapshotStale = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestIsOpenAICodexSnapshotStale_NonOAuthUnaffected 确认放开白名单没有把非 OAuth
+// 账号一起卷进来:第一道守卫仍然拦住它们。
+func TestIsOpenAICodexSnapshotStale_NonOAuthUnaffected(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	staleAt := now.Add(-(openAIProbeCacheTTL + time.Minute)).Format(time.RFC3339)
+
+	notOpenAI := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"codex_usage_updated_at": staleAt},
+	}
+	if isOpenAICodexSnapshotStale(notOpenAI, now) {
+		t.Fatal("expected non-OpenAI account to be unaffected by the whitelist removal")
+	}
+
+	empty := &Account{}
+	if isOpenAICodexSnapshotStale(empty, now) {
+		t.Fatal("expected zero-value account to stay non-stale")
+	}
 }
