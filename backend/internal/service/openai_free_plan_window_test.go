@@ -158,8 +158,9 @@ func TestBuildCodexUsageExtraUpdates_FreePlanWritesNoFiveHourKeys(t *testing.T) 
 		"codex_5h_window_minutes",
 		"codex_5h_reset_at",
 	} {
-		if v, ok := updates[key]; ok {
-			t.Fatalf("updates[%q] = %v, 该键不应存在：free 套餐没有 5h 窗口", key, v)
+		v, ok := updates[key]
+		if !ok || v != nil {
+			t.Fatalf("updates[%q] = %v (present=%v), want nil deletion marker：free 套餐没有 5h 窗口", key, v, ok)
 		}
 	}
 

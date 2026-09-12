@@ -7,9 +7,13 @@ package service
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
 
@@ -115,6 +119,38 @@ func TestCNProviderBalanceService_QueryBalanceForAccount_RejectsInvalidAccount(t
 
 // ID 入口与 ForAccount 入口对同一账号的行为一致（loadCodingPlanAccount 的
 // 加载后校验 = validateCodingPlanAccount；余额侧对称）。
+func TestCNProviderQuotaService_EmptyTiersAreUnhealthyAndNotPersisted(t *testing.T) {
+	repo := &fakeCNProbeAccountRepo{}
+	upstream := &staticCNQuotaHTTPUpstream{body: `{"limits":[]}`}
+	svc := NewCNProviderQuotaService(repo, nil, upstream, nil)
+
+	result, err := svc.QueryUsageForAccount(context.Background(), codingAccount(PlatformZhipu))
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.False(t, result.CredentialValid)
+	require.Empty(t, result.Tiers)
+	require.Equal(t, "quota response contained no usable tiers", result.Error)
+	require.False(t, repo.updateExtraCalled, "empty tiers must not refresh usage_updated_at")
+}
+
+type staticCNQuotaHTTPUpstream struct {
+	body string
+}
+
+var _ HTTPUpstream = (*staticCNQuotaHTTPUpstream)(nil)
+
+func (u *staticCNQuotaHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(u.body)),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func (u *staticCNQuotaHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
+
 func TestCNProviderServices_IDEntryAppliesSameValidation(t *testing.T) {
 	repo := &fakeCNProbeAccountRepo{account: paygAccount(PlatformKimi)}
 	upstream := &recordingHTTPUpstream{}

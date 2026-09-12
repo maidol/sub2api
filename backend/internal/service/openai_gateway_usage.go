@@ -1085,6 +1085,15 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 
 	// 归一化到 5h/7d 规范字段
 	if normalized := snapshot.Normalize(); normalized != nil {
+		if snapshot.SecondaryWindowMinutes != nil && *snapshot.SecondaryWindowMinutes <= 0 {
+			// Upstream explicitly reports no 5h window (free plans use this shape).
+			// nil is interpreted by AccountRepository.UpdateExtra as a JSONB key removal,
+			// so stale paid-plan values cannot keep rendering a phantom 5h window.
+			updates["codex_5h_used_percent"] = nil
+			updates["codex_5h_reset_after_seconds"] = nil
+			updates["codex_5h_window_minutes"] = nil
+			updates["codex_5h_reset_at"] = nil
+		}
 		if normalized.Used5hPercent != nil {
 			updates["codex_5h_used_percent"] = *normalized.Used5hPercent
 		}

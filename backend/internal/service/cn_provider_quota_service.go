@@ -258,6 +258,10 @@ func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, accou
 		result.PlanLevel = strings.TrimSpace(gjson.GetBytes(bodyBytes, "current_subscribe_title").String())
 	}
 	result.Tiers = tiers
+	if len(tiers) == 0 {
+		result.Error = "quota response contained no usable tiers"
+		return result, nil
+	}
 	result.Success = true
 	result.CredentialValid = true
 

@@ -65,11 +65,17 @@ func (u *recordingHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, ac
 
 type fakeCNProbeAccountRepo struct {
 	AccountRepository
-	account *Account
+	account           *Account
+	updateExtraCalled bool
 }
 
 func (r *fakeCNProbeAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
 	return r.account, nil
+}
+
+func (r *fakeCNProbeAccountRepo) UpdateExtra(_ context.Context, _ int64, _ map[string]any) error {
+	r.updateExtraCalled = true
+	return nil
 }
 
 // kimi coding 账号的 base_url 指向中转（含 api.kimi.com/coding 路径段即可被识别

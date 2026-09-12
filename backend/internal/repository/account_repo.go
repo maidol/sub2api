@@ -2656,7 +2656,8 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 
 	clearProbeSnapshot := upstreamBillingProbeExplicitlyDisabled(updates) || upstreamBillingProbeSnapshotClearRequested(updates)
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot
+	clearCodexFiveHourSnapshot := codexFiveHourSnapshotClearRequested(updates)
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || clearCodexFiveHourSnapshot
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -2676,6 +2677,9 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
+	}
+	if clearCodexFiveHourSnapshot {
+		extraExpression = "(" + extraExpression + ") - ARRAY['codex_5h_used_percent', 'codex_5h_reset_after_seconds', 'codex_5h_window_minutes', 'codex_5h_reset_at']"
 	}
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
@@ -2910,6 +2914,22 @@ func upstreamBillingProbeExplicitlyDisabled(extra map[string]any) bool {
 func upstreamBillingProbeSnapshotClearRequested(extra map[string]any) bool {
 	value, ok := extra[service.UpstreamBillingProbeExtraKey]
 	return ok && value == nil
+}
+
+func codexFiveHourSnapshotClearRequested(extra map[string]any) bool {
+	keys := []string{
+		"codex_5h_used_percent",
+		"codex_5h_reset_after_seconds",
+		"codex_5h_window_minutes",
+		"codex_5h_reset_at",
+	}
+	for _, key := range keys {
+		value, ok := extra[key]
+		if !ok || value != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func ollamaCloudUsageSnapshotClearRequested(extra map[string]any) bool {
