@@ -155,6 +155,9 @@ type UsageProgress struct {
 	// WindowMinutes is the upstream-declared real window length in minutes.
 	// Codex's 5h/7d fields are slots; the actual length is plan-dependent.
 	WindowMinutes int `json:"window_minutes,omitempty"`
+	// QuotaWindowAbsent indicates that the upstream has no quota window;
+	// WindowStats may still contain local traffic for that period.
+	QuotaWindowAbsent bool `json:"quota_window_absent,omitempty"`
 }
 
 // AntigravityModelQuota Antigravity 单个模型的配额信息
@@ -791,11 +794,16 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		return usage, nil
 	}
 
+	// Quota and local traffic are independent: a plan may have no 5h quota
+	// while its recent traffic still needs to be reported.
 	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, codexWindowStatsStart(usage.FiveHour, 5*time.Hour, now)); err == nil {
-		if usage.FiveHour == nil {
-			usage.FiveHour = &UsageProgress{Utilization: 0}
+		windowStats := windowStatsFromAccountStats(stats)
+		switch {
+		case usage.FiveHour != nil:
+			usage.FiveHour.WindowStats = windowStats
+		case windowStats.Requests > 0 || windowStats.Tokens > 0:
+			usage.FiveHour = &UsageProgress{WindowStats: windowStats, QuotaWindowAbsent: true}
 		}
-		usage.FiveHour.WindowStats = windowStatsFromAccountStats(stats)
 	}
 
 	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, codexWindowStatsStart(usage.SevenDay, 7*24*time.Hour, now)); err == nil {
@@ -1011,12 +1019,10 @@ func applyExtraToUsage(usage *UsageInfo, extra map[string]any, now time.Time) {
 	if usage == nil {
 		return
 	}
-	if progress := buildCodexUsageProgressFromExtra(extra, "5h", now); progress != nil {
-		usage.FiveHour = progress
-	}
-	if progress := buildCodexUsageProgressFromExtra(extra, "7d", now); progress != nil {
-		usage.SevenDay = progress
-	}
+	// Extra is the authoritative window state; nil means the window does not exist.
+	// Assign both slots unconditionally so a refresh can clear stale in-memory data.
+	usage.FiveHour = buildCodexUsageProgressFromExtra(extra, "5h", now)
+	usage.SevenDay = buildCodexUsageProgressFromExtra(extra, "7d", now)
 }
 
 func (s *AccountUsageService) getGeminiUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
@@ -1556,8 +1562,10 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 		return nil
 	}
 
+	// 删除标记在内存 Extra 里是“键存在、值为 nil”（mergeAccountExtra 原样合并了
+	// UpdateExtra 的删除标记）。只判断键在不在，会把已删除的窗口读成 0% 进度。
 	usedRaw, ok := extra[usedPercentKey]
-	if !ok {
+	if !ok || usedRaw == nil {
 		return nil
 	}
 

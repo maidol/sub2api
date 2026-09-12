@@ -1330,6 +1330,8 @@ export interface UsageProgress {
   used_requests?: number
   limit_requests?: number
   window_minutes?: number
+  /** Upstream has no quota window; only window_stats is meaningful. */
+  quota_window_absent?: boolean
 }
 
 // Antigravity 单个模型的配额信息

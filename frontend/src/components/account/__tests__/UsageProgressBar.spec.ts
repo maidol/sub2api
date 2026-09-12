@@ -204,3 +204,23 @@ describe('UsageProgressBar', () => {
     expect(percent.classes()).toContain('text-right')
   })
 })
+
+describe('UsageProgressBar — no quota window', () => {
+  const stats = { requests: 5, tokens: 75, cost: 0.04, standard_cost: 0.04, user_cost: 0.04 }
+
+  it('quotaWindowAbsent renders stats without progress or percentage', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization: 0, color: 'indigo', windowStats: stats, quotaWindowAbsent: true }
+    })
+    expect(wrapper.text()).toContain('req')
+    expect(wrapper.text()).not.toContain('%')
+  })
+
+  it('default quota window still renders progress and percentage', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization: 33, color: 'indigo', windowStats: stats }
+    })
+    expect(wrapper.text()).toContain('req')
+    expect(wrapper.text()).toContain('33%')
+  })
+})

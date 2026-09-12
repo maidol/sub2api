@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -50,10 +51,32 @@ type OpenAIRateLimitWindow struct {
 
 // OpenAIRateLimit is a rate-limit envelope (primary + optional secondary window).
 type OpenAIRateLimit struct {
-	Allowed         bool                   `json:"allowed"`
-	LimitReached    bool                   `json:"limit_reached"`
-	PrimaryWindow   *OpenAIRateLimitWindow `json:"primary_window,omitempty"`
-	SecondaryWindow *OpenAIRateLimitWindow `json:"secondary_window,omitempty"`
+	Allowed                bool                   `json:"allowed"`
+	LimitReached           bool                   `json:"limit_reached"`
+	PrimaryWindow          *OpenAIRateLimitWindow `json:"primary_window,omitempty"`
+	SecondaryWindow        *OpenAIRateLimitWindow `json:"secondary_window,omitempty"`
+	secondaryWindowPresent bool
+}
+
+// UnmarshalJSON preserves whether upstream explicitly sent secondary_window as
+// null. Free plans use that shape to signal that the 5h slot does not exist;
+// absent fields must remain distinct for partial/legacy payloads.
+func (r *OpenAIRateLimit) UnmarshalJSON(data []byte) error {
+	type alias OpenAIRateLimit
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = OpenAIRateLimit(decoded)
+	r.secondaryWindowPresent = false
+	if raw, ok := fields["secondary_window"]; ok {
+		r.secondaryWindowPresent = string(raw) == "null"
+	}
+	return nil
 }
 
 // OpenAIAdditionalRateLimit describes a per-feature rate limit (e.g. Codex Spark).

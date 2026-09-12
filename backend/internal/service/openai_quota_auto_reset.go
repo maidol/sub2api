@@ -578,6 +578,10 @@ func buildOpenAIAutoResetUsageUpdates(usage *OpenAIQuotaUsage, now time.Time) ma
 	}
 	applyWindow(rateLimit.PrimaryWindow, true)
 	applyWindow(rateLimit.SecondaryWindow, false)
+	if rateLimit.secondaryWindowPresent && rateLimit.SecondaryWindow == nil {
+		zero := 0
+		snapshot.SecondaryWindowMinutes = &zero
+	}
 	return buildCodexUsageExtraUpdates(snapshot, now)
 }
 

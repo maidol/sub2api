@@ -33,8 +33,8 @@
       </div>
     </div>
 
-    <!-- Progress bar row -->
-    <div class="flex items-center gap-1">
+    <!-- Progress bar row (omitted when no quota window exists) -->
+    <div v-if="!quotaWindowAbsent" class="flex items-center gap-1">
       <!-- Label badge (label-width: fixed = 定宽居中, auto = 限宽截断左对齐) -->
       <span :class="[labelSizeClass, labelClass]">
         {{ label }}
@@ -76,6 +76,8 @@ const props = withDefaults(
     color: 'indigo' | 'emerald' | 'purple' | 'amber'
     windowStats?: WindowStats | null
     estimatedTotalCost?: number | null
+    /** Upstream has no quota window; render stats without the progress row. */
+    quotaWindowAbsent?: boolean
     showNowWhenIdle?: boolean
     remainingCapacity?: boolean
     /** fixed: 定宽居中徽章（账号页纵向对齐）；auto: 限宽截断左对齐（监控页组合标签） */
