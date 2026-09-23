@@ -109,6 +109,7 @@ type ModelPricing struct {
 	CacheReadPricePerTokenPriority     float64            // priority service tier 下缓存读取每token价格 (USD)
 	FastMultiplier                     *float64           // 渠道显式 Fast/priority 倍率；nil 时沿用模型目录行为
 	FlexMultiplier                     *float64           // 渠道显式 Flex 倍率；nil 时沿用默认行为
+	PriorityUsesStandardPrice          bool               // 官方未公布独立 priority/fast 费率，该档按标准价计费（而非通用 2x 兜底）
 	ReasoningEffortMultipliers         map[string]float64 // 最终转发的推理等级对应的计费倍率；未配置的等级按 1 倍计费
 	CacheCreation5mPrice               float64            // 5分钟缓存创建每token价格 (USD)
 	CacheCreation1hPrice               float64            // 1小时缓存创建每token价格 (USD)
@@ -157,6 +158,12 @@ func configuredServiceTierMultiplier(serviceTier string, pricing *ModelPricing) 
 		case "priority", "fast":
 			if pricing.FastMultiplier != nil {
 				return *pricing.FastMultiplier
+			}
+			// 官方没有独立 priority 费率的模型：按标准价，而不是落到
+			// serviceTierCostMultiplier 的通用 2x 兜底。渠道显式配置的
+			// FastMultiplier 仍然优先——那是运营者针对该渠道的主动定价。
+			if pricing.PriorityUsesStandardPrice {
+				return 1.0
 			}
 		case "flex":
 			if pricing.FlexMultiplier != nil {
@@ -464,12 +471,17 @@ func (s *BillingService) initFallbackPricing() {
 	// Gemini 3.6 Flash (Google AI pricing: $1.50 input / $7.50 output /
 	// $0.15 cached input per MTok). Antigravity's -high/-low/-medium/-tiered
 	// aliases are matched below so unavailable remote pricing never records
-	// token-bearing requests at $0.
+	// token-bearing requests at $0. priority 费率与价格目录里的 gemini-3.6-flash
+	// 条目一致（1.8x）——写在这里是为了让目录加载失败时的兜底价与目录同价，
+	// 否则 priority 请求会落到通用 2x 倍率，与目录对不上。
 	s.fallbackPrices["gemini-3.6-flash"] = &ModelPricing{
-		InputPricePerToken:     1.5e-6,
-		OutputPricePerToken:    7.5e-6,
-		CacheReadPricePerToken: 0.15e-6,
-		SupportsCacheBreakdown: false,
+		InputPricePerToken:             1.5e-6,
+		InputPricePerTokenPriority:     2.7e-6,
+		OutputPricePerToken:            7.5e-6,
+		OutputPricePerTokenPriority:    13.5e-6,
+		CacheReadPricePerToken:         0.15e-6,
+		CacheReadPricePerTokenPriority: 0.27e-6,
+		SupportsCacheBreakdown:         false,
 	}
 
 	// Gemini 3.7 Flash (Google AI pricing: $0.75 input / $3.75 output /
@@ -477,11 +489,13 @@ func (s *BillingService) initFallbackPricing() {
 	// rates double to $1.50/$7.50/$0.15 from 2027-01-01). Antigravity's
 	// -high/-low/-medium/-tiered aliases are matched below so unavailable
 	// remote pricing never records token-bearing requests at $0.
+	// 官方未公布独立 priority/service-tier 费率，priority 请求按标准价计费。
 	s.fallbackPrices["gemini-3.7-flash"] = &ModelPricing{
-		InputPricePerToken:     0.75e-6,
-		OutputPricePerToken:    3.75e-6,
-		CacheReadPricePerToken: 0.075e-6,
-		SupportsCacheBreakdown: false,
+		InputPricePerToken:        0.75e-6,
+		OutputPricePerToken:       3.75e-6,
+		CacheReadPricePerToken:    0.075e-6,
+		SupportsCacheBreakdown:    false,
+		PriorityUsesStandardPrice: true,
 	}
 
 	// Gemini 3.8 Flash (Google AI pricing: $0.75 input / $3.75 output /
@@ -489,11 +503,13 @@ func (s *BillingService) initFallbackPricing() {
 	// rates double to $1.50/$7.50/$0.15 from 2027-01-01). Antigravity's
 	// -high/-low/-medium/-tiered aliases are matched below so unavailable
 	// remote pricing never records token-bearing requests at $0.
+	// 官方未公布独立 priority/service-tier 费率，priority 请求按标准价计费。
 	s.fallbackPrices["gemini-3.8-flash"] = &ModelPricing{
-		InputPricePerToken:     0.75e-6,
-		OutputPricePerToken:    3.75e-6,
-		CacheReadPricePerToken: 0.075e-6,
-		SupportsCacheBreakdown: false,
+		InputPricePerToken:        0.75e-6,
+		OutputPricePerToken:       3.75e-6,
+		CacheReadPricePerToken:    0.075e-6,
+		SupportsCacheBreakdown:    false,
+		PriorityUsesStandardPrice: true,
 	}
 
 	// OpenAI GPT-5.4（业务指定价格）
@@ -1321,6 +1337,7 @@ func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*
 				CacheCreationPricePerTokenPriority: litellmPricing.CacheCreationInputTokenCostPriority,
 				CacheReadPricePerToken:             litellmPricing.CacheReadInputTokenCost,
 				CacheReadPricePerTokenPriority:     litellmPricing.CacheReadInputTokenCostPriority,
+				PriorityUsesStandardPrice:          isGeminiFlashFamilyWithoutPriorityPricing(model) && !litellmPricing.SupportsServiceTier,
 				CacheCreation5mPrice:               price5m,
 				CacheCreation1hPrice:               price1h,
 				SupportsCacheBreakdown:             enableBreakdown,
@@ -1790,6 +1807,32 @@ func (s *BillingService) calculateCostInternalWithPolicy(
 	}
 
 	return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, longContextBillingEnabled), nil
+}
+
+// geminiFlashFamiliesWithoutPriorityPricing 列出官方未公布独立 priority/service-tier
+// 费率的 Gemini Flash 家族。生产代码与回归用例共用这一份清单，新增家族时只改这里。
+var geminiFlashFamiliesWithoutPriorityPricing = []string{
+	"gemini-3.7-flash",
+	"gemini-3.8-flash",
+}
+
+// isGeminiFlashFamilyWithoutPriorityPricing 判断模型是否属于上面的家族。
+// 匹配家族名本身与其 -high/-low/-medium/-tiered 档位，同时接受把小数点写成
+// 连字符的旧拼法（gemini-3-8-flash）。用前缀而不是 Contains：Contains 会让
+// 将来的 gemini-3.8-flash-pro 之类新档位在没人复核价格时自动继承此判定。
+func isGeminiFlashFamilyWithoutPriorityPricing(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx != -1 {
+		model = model[idx+1:]
+	}
+	for _, family := range geminiFlashFamiliesWithoutPriorityPricing {
+		for _, spelling := range []string{family, strings.Replace(family, ".", "-", 1)} {
+			if model == spelling || strings.HasPrefix(model, spelling+"-") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // applyModelSpecificPricingPolicy 对目录数据做模型特定修正：DeepSeek 官方价
