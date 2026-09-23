@@ -382,8 +382,9 @@ func (p *StreamingProcessor) processFunctionCall(fc *GeminiFunctionCall, signatu
 	_, _ = result.Write(p.startBlock(BlockTypeFunction, toolUse))
 
 	// 发送 input_json_delta
-	if fc.Args != nil {
-		argsJSON, _ := json.Marshal(fc.Args)
+	// 摘掉给无参数工具注入的占位参数，客户端不应看到它
+	if args := StripPlaceholderArgs(fc.Args); args != nil {
+		argsJSON, _ := json.Marshal(args)
 		_, _ = result.Write(p.emitDelta("input_json_delta", map[string]any{
 			"partial_json": string(argsJSON),
 		}))

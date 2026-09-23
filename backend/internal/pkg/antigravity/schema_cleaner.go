@@ -2,8 +2,61 @@ package antigravity
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 )
+
+// PlaceholderArgKey 是给「无参数工具」注入的占位参数名。
+//
+// Gemini 不接受 properties 为空的 function declaration，所以下面第 7 步会给这类
+// 工具塞一个必填的占位参数。注入必须成对：出去时加、回来时摘。只加不摘的话，
+// 模型填出来的这个参数会原样出现在回给客户端的 tool_use.input 里，而客户端的
+// 工具并不认识它。
+//
+// 名字刻意取成带前缀的保留字而不是 "reason"：后者是常见的真实参数名，一旦
+// 某个工具本来就有 reason 参数，摘除逻辑就会误删真实入参。
+const PlaceholderArgKey = "__sub2api_no_args_reason"
+
+// StripPlaceholderArgs 从模型回传的 tool-call 入参里摘掉占位参数。
+// 没有任何改动时返回原值本身，避免为未受影响的请求多分配一份。
+func StripPlaceholderArgs(args any) any {
+	switch value := args.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		changed := false
+		for key, item := range value {
+			if key == PlaceholderArgKey {
+				changed = true
+				continue
+			}
+			cleaned := StripPlaceholderArgs(item)
+			if !reflect.DeepEqual(cleaned, item) {
+				changed = true
+			}
+			out[key] = cleaned
+		}
+		if !changed {
+			return args
+		}
+		return out
+	case []any:
+		out := make([]any, len(value))
+		changed := false
+		for i, item := range value {
+			cleaned := StripPlaceholderArgs(item)
+			if !reflect.DeepEqual(cleaned, item) {
+				changed = true
+			}
+			out[i] = cleaned
+		}
+		if !changed {
+			return args
+		}
+		return out
+	default:
+		return args
+	}
+}
 
 // CleanJSONSchema 清理 JSON Schema，移除 Antigravity/Gemini 不支持的字段
 // 参考 Antigravity-Manager/src-tauri/src/proxy/common/json_schema.rs 实现
@@ -354,13 +407,14 @@ func cleanJSONSchemaRecursive(value any) any {
 				hasProps = true
 			}
 			if !hasProps {
+				// 与 StripPlaceholderArgs 成对：这里注入，回程摘除。
 				schemaMap["properties"] = map[string]any{
-					"reason": map[string]any{
+					PlaceholderArgKey: map[string]any{
 						"type":        "string",
 						"description": "Reason for calling this tool",
 					},
 				}
-				schemaMap["required"] = []any{"reason"}
+				schemaMap["required"] = []any{PlaceholderArgKey}
 			}
 		}
 

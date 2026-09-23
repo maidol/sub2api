@@ -128,10 +128,11 @@ func (p *NonStreamingProcessor) processPart(part *GeminiPart) {
 		}
 
 		item := ClaudeContentItem{
-			Type:  "tool_use",
-			ID:    toolID,
-			Name:  part.FunctionCall.Name,
-			Input: part.FunctionCall.Args,
+			Type: "tool_use",
+			ID:   toolID,
+			Name: part.FunctionCall.Name,
+			// 摘掉给无参数工具注入的占位参数，客户端不应看到它
+			Input: StripPlaceholderArgs(part.FunctionCall.Args),
 		}
 
 		if signature != "" {
