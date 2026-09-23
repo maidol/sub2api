@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+const gemini38SchedulerModel = "gemini-3.8-flash"
+
+type Gemini38SchedulerStatus struct {
+	Supported     bool       `json:"supported"`
+	Schedulable   bool       `json:"schedulable"`
+	RateLimited   bool       `json:"rate_limited"`
+	UsingOverages bool       `json:"using_overages"`
+	ResetAt       *time.Time `json:"reset_at,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+}
+
 func normalizeAntigravityModelName(model string) string {
 	normalized := strings.ToLower(strings.TrimSpace(model))
 	if idx := strings.LastIndex(normalized, "/publishers/google/models/"); idx != -1 {
@@ -32,6 +43,61 @@ func resolveAntigravityModelKey(requestedModel string) string {
 // 保持旧签名以兼容既有调用方；默认使用 context.Background()。
 func (a *Account) IsSchedulableForModel(requestedModel string) bool {
 	return a.IsSchedulableForModelWithContext(context.Background(), requestedModel)
+}
+
+// EvaluateGemini38SchedulerStatus returns the current read-only routing status
+// for the canonical Gemini 3.8 Flash request model. It reuses the same mapping,
+// family-scope and overages rules as request scheduling.
+func (a *Account) EvaluateGemini38SchedulerStatus(ctx context.Context) Gemini38SchedulerStatus {
+	status := Gemini38SchedulerStatus{}
+	if a == nil || a.Platform != PlatformAntigravity {
+		status.Reason = "unsupported"
+		return status
+	}
+	if !a.IsModelSupported(gemini38SchedulerModel) {
+		status.Reason = "unsupported"
+		return status
+	}
+	status.Supported = true
+	status.Schedulable = a.IsSchedulableForModelWithContext(ctx, gemini38SchedulerModel)
+	status.RateLimited = a.isModelRateLimitedWithContext(ctx, gemini38SchedulerModel)
+	if status.RateLimited {
+		status.ResetAt = a.gemini38SchedulerResetAt(ctx)
+	}
+	if status.RateLimited {
+		if a.IsOveragesEnabled() && !a.isCreditsExhausted() && status.Schedulable {
+			status.UsingOverages = true
+			status.Reason = "overage_available"
+		} else if a.isCreditsExhausted() {
+			status.Reason = "credits_exhausted"
+		} else {
+			status.Reason = "model_rate_limited"
+		}
+	} else if !status.Schedulable {
+		status.Reason = "account_unschedulable"
+	} else {
+		status.Reason = "schedulable"
+	}
+	return status
+}
+
+func (a *Account) gemini38SchedulerResetAt(ctx context.Context) *time.Time {
+	var resetAt *time.Time
+	for _, key := range a.modelRateLimitKeysForRequest(ctx, gemini38SchedulerModel) {
+		candidate := a.modelRateLimitResetAt(key)
+		if candidate == nil || !time.Now().Before(*candidate) {
+			continue
+		}
+		if resetAt == nil || candidate.After(*resetAt) {
+			resetAt = candidate
+		}
+	}
+	if creditsResetAt := a.modelRateLimitResetAt(creditsExhaustedKey); creditsResetAt != nil && time.Now().Before(*creditsResetAt) {
+		if resetAt == nil || creditsResetAt.After(*resetAt) {
+			resetAt = creditsResetAt
+		}
+	}
+	return resetAt
 }
 
 func (a *Account) IsSchedulableForModelWithContext(ctx context.Context, requestedModel string) bool {

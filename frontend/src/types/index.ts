@@ -1195,6 +1195,15 @@ export interface OpenCodeGoUsageSettings {
   debounce_minutes: number
 }
 
+export interface Gemini38SchedulerStatus {
+  supported: boolean
+  schedulable: boolean
+  rate_limited: boolean
+  using_overages: boolean
+  reset_at?: string | null
+  reason?: string
+}
+
 export interface Account {
   id: number
   name: string
@@ -1209,6 +1218,7 @@ export interface Account {
   credentials_status?: Record<string, boolean>
   ollama_cloud_usage?: OllamaCloudUsageState
   opencode_go_usage?: OpenCodeGoUsageState
+  gemini_38_scheduler?: Gemini38SchedulerStatus | null
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>

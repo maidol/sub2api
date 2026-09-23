@@ -14,7 +14,19 @@
 
     <!-- Main Status Badge (shown when not rate limited/overloaded) -->
     <template v-else>
-      <div v-if="isTempUnschedulable" class="flex flex-col items-center gap-1">
+      <div v-if="gemini38Unavailable" class="flex flex-col items-center gap-1">
+        <span class="badge text-xs badge-warning">
+          {{ gemini38Status?.reason === 'credits_exhausted'
+            ? t('admin.accounts.status.gemini38CreditsExhausted')
+            : t('admin.accounts.status.gemini38Limited') }}
+        </span>
+        <span v-if="gemini38Status?.reset_at" class="text-[11px] text-gray-400 dark:text-gray-500">
+          {{ gemini38Status.reason === 'credits_exhausted'
+            ? t('admin.accounts.status.gemini38CreditsExhaustedUntil', { time: formatDateTimeToMinute(gemini38Status.reset_at) })
+            : t('admin.accounts.status.gemini38RateLimitedUntil', { time: formatDateTimeToMinute(gemini38Status.reset_at) }) }}
+        </span>
+      </div>
+      <div v-else-if="isTempUnschedulable" class="flex flex-col items-center gap-1">
         <button
           type="button"
           :class="['badge text-xs', statusClass, 'cursor-pointer']"
@@ -77,6 +89,28 @@
         <div
           class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"
         ></div>
+      </div>
+    </div>
+
+    <!-- Gemini 3.8 routing status is evaluated by the backend scheduler. -->
+    <div v-if="gemini38Status" class="group relative">
+      <span
+        :class="[
+          'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium',
+          gemini38Status.schedulable ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+        ]"
+      >
+        <span v-if="gemini38Status.using_overages">⚡</span>
+        <Icon v-else-if="!gemini38Status.schedulable" name="exclamationTriangle" size="xs" :stroke-width="2" />
+        G3.8
+      </span>
+      <div
+        v-if="gemini38Status.reset_at && !gemini38Status.schedulable"
+        class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-max -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-3 py-2 text-center text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+      >
+        {{ gemini38Status.reason === 'credits_exhausted'
+          ? t('admin.accounts.status.gemini38CreditsExhaustedUntil', { time: formatDateTimeToMinute(gemini38Status.reset_at) })
+          : t('admin.accounts.status.gemini38RateLimitedUntil', { time: formatDateTimeToMinute(gemini38Status.reset_at) }) }}
       </div>
     </div>
 
@@ -176,6 +210,16 @@ const emit = defineEmits<{
 }>()
 
 // Computed: is rate limited (429)
+const gemini38Status = computed(() => {
+  if (props.account.platform !== 'antigravity') return null
+  const status = props.account.gemini_38_scheduler
+  return status?.supported ? status : null
+})
+
+const gemini38Unavailable = computed(() => {
+  return !!gemini38Status.value?.rate_limited && !gemini38Status.value.schedulable
+})
+
 const isRateLimited = computed(() => {
   if (!props.account.rate_limit_reset_at) return false
   return new Date(props.account.rate_limit_reset_at) > new Date()

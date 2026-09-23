@@ -188,6 +188,102 @@ describe('AccountStatusIndicator', () => {
     expect(wrapper.text()).toContain('admin.accounts.status.creditsExhausted')
   })
 
+  it('Gemini 3.8 限流时主状态不再显示正常', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          gemini_38_scheduler: {
+            supported: true,
+            schedulable: false,
+            rate_limited: true,
+            using_overages: false,
+            reason: 'model_rate_limited',
+            reset_at: '2099-03-15T00:00:00Z'
+          }
+        })
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('G3.8')
+    expect(wrapper.text()).toContain('admin.accounts.status.gemini38Limited')
+  })
+
+  it('账号级不可调度不被误显示为 Gemini 3.8 限流', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          schedulable: false,
+          gemini_38_scheduler: {
+            supported: true,
+            schedulable: false,
+            rate_limited: false,
+            using_overages: false,
+            reason: 'account_unschedulable'
+          }
+        })
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('admin.accounts.status.paused')
+    expect(wrapper.text()).not.toContain('admin.accounts.status.gemini38Limited')
+  })
+
+  it('后端派生状态显示 Gemini 3.8 family 限流，而不从原始限流键计数', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          gemini_38_scheduler: {
+            supported: true,
+            schedulable: false,
+            rate_limited: true,
+            using_overages: false,
+            reason: 'model_rate_limited',
+            reset_at: '2099-03-15T00:00:00Z'
+          },
+          extra: {
+            model_rate_limits: {
+              'gemini-3.8-flash-medium': {
+                rate_limited_at: '2026-03-15T00:00:00Z',
+                rate_limit_reset_at: '2099-03-15T00:00:00Z'
+              },
+              'antigravity:gemini': {
+                rate_limited_at: '2026-03-15T00:00:00Z',
+                rate_limit_reset_at: '2099-03-15T00:00:00Z'
+              }
+            }
+          }
+        })
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('G3.8')
+    expect(wrapper.text()).not.toContain('G3.8 2/')
+  })
+
+  it('后端派生状态显示 Gemini 3.8 credits 回退', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          gemini_38_scheduler: {
+            supported: true,
+            schedulable: true,
+            rate_limited: true,
+            using_overages: true,
+            reason: 'overage_available',
+            reset_at: '2099-03-15T00:00:00Z'
+          }
+        })
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('G3.8')
+    expect(wrapper.text()).toContain('⚡')
+  })
+
   it('模型限流 + overages 启用 + AICredits key 生效 → 普通限流样式（积分耗尽，无 ⚡）', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {

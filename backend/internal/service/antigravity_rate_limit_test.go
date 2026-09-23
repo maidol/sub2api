@@ -317,6 +317,126 @@ func TestAccountIsSchedulableForModel_AntigravityRateLimits(t *testing.T) {
 	require.True(t, account.IsSchedulableForModel("gemini-3-flash"))
 }
 
+func TestEvaluateGemini38SchedulerStatus(t *testing.T) {
+	now := time.Now().UTC()
+	future := now.Add(10 * time.Minute)
+	later := now.Add(20 * time.Minute)
+	baseAccount := func() *Account {
+		return &Account{
+			ID:          1,
+			Platform:    PlatformAntigravity,
+			Status:      StatusActive,
+			Schedulable: true,
+		}
+	}
+	limitEntry := func(resetAt time.Time) map[string]any {
+		return map[string]any{
+			"rate_limited_at":     now.Format(time.RFC3339),
+			"rate_limit_reset_at": resetAt.Format(time.RFC3339),
+		}
+	}
+
+	tests := []struct {
+		name            string
+		account         func() *Account
+		wantSupported   bool
+		wantSchedulable bool
+		wantRateLimited bool
+		wantOverages    bool
+		wantReason      string
+		wantResetAt     *time.Time
+	}{
+		{
+			name:            "default mapping is schedulable",
+			account:         baseAccount,
+			wantSupported:   true,
+			wantSchedulable: true,
+			wantReason:      "schedulable",
+		},
+		{
+			name: "shared Gemini family limit blocks the model",
+			account: func() *Account {
+				account := baseAccount()
+				account.Extra = map[string]any{"model_rate_limits": map[string]any{
+					antigravityGeminiModelRateLimitKey: limitEntry(later),
+				}}
+				return account
+			},
+			wantSupported:   true,
+			wantSchedulable: false,
+			wantRateLimited: true,
+			wantReason:      "model_rate_limited",
+			wantResetAt:     &later,
+		},
+		{
+			name: "overages keep a limited model schedulable",
+			account: func() *Account {
+				account := baseAccount()
+				account.Extra = map[string]any{
+					"allow_overages": true,
+					"model_rate_limits": map[string]any{
+						antigravityGeminiModelRateLimitKey: limitEntry(future),
+					},
+				}
+				return account
+			},
+			wantSupported:   true,
+			wantSchedulable: true,
+			wantRateLimited: true,
+			wantOverages:    true,
+			wantReason:      "overage_available",
+			wantResetAt:     &future,
+		},
+		{
+			name: "credits exhaustion blocks overages",
+			account: func() *Account {
+				account := baseAccount()
+				account.Extra = map[string]any{
+					"allow_overages": true,
+					"model_rate_limits": map[string]any{
+						antigravityGeminiModelRateLimitKey: limitEntry(future),
+						"AICredits":                        limitEntry(later),
+					},
+				}
+				return account
+			},
+			wantSupported:   true,
+			wantSchedulable: false,
+			wantRateLimited: true,
+			wantReason:      "credits_exhausted",
+			wantResetAt:     &later,
+		},
+		{
+			name: "non Antigravity account is not applicable",
+			account: func() *Account {
+				account := baseAccount()
+				account.Platform = PlatformOpenAI
+				return account
+			},
+			wantSupported:   false,
+			wantSchedulable: false,
+			wantReason:      "unsupported",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.account().EvaluateGemini38SchedulerStatus(context.Background())
+			require.Equal(t, tt.wantSupported, got.Supported)
+			require.Equal(t, tt.wantSchedulable, got.Schedulable)
+			require.Equal(t, tt.wantRateLimited, got.RateLimited)
+			require.Equal(t, tt.wantOverages, got.UsingOverages)
+			require.Equal(t, tt.wantReason, got.Reason)
+			if tt.wantResetAt == nil {
+				require.Nil(t, got.ResetAt)
+				return
+			}
+			require.NotNil(t, got.ResetAt)
+			require.WithinDuration(t, *tt.wantResetAt, *got.ResetAt, time.Second)
+		})
+	}
+}
+
 func buildGeminiRateLimitBody(delay string) []byte {
 	return []byte(fmt.Sprintf(`{"error":{"message":"too many requests","details":[{"metadata":{"quotaResetDelay":%q}}]}}`, delay))
 }
