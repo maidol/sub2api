@@ -62,6 +62,7 @@ type AccountHandler struct {
 	sessionLimitCache       service.SessionLimitCache
 	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
+	upstreamErrorCounter    service.UpstreamErrorCounter
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
@@ -98,7 +99,12 @@ func NewAccountHandler(
 	sessionLimitCache service.SessionLimitCache,
 	rpmCache service.RPMCache,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
+	upstreamErrorCounter ...service.UpstreamErrorCounter,
 ) *AccountHandler {
+	var errorCounter service.UpstreamErrorCounter
+	if len(upstreamErrorCounter) > 0 {
+		errorCounter = upstreamErrorCounter[0]
+	}
 	return &AccountHandler{
 		adminService:            adminService,
 		oauthService:            oauthService,
@@ -114,6 +120,7 @@ func NewAccountHandler(
 		sessionLimitCache:       sessionLimitCache,
 		rpmCache:                rpmCache,
 		tokenCacheInvalidator:   tokenCacheInvalidator,
+		upstreamErrorCounter:    errorCounter,
 	}
 }
 
@@ -203,9 +210,10 @@ type AccountWithConcurrency struct {
 	SchedulerScores    []AccountSchedulerGroupScore     `json:"scheduler_scores,omitempty"`
 	Gemini38Scheduler  *service.Gemini38SchedulerStatus `json:"gemini_38_scheduler,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
-	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
-	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
-	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`  // 当前窗口费用
+	ActiveSessions     *int                         `json:"active_sessions,omitempty"`      // 当前活跃会话数
+	CurrentRPM         *int                         `json:"current_rpm,omitempty"`          // 当前分钟 RPM 计数
+	UpstreamErrorCount *service.UpstreamErrorCounts `json:"upstream_error_count,omitempty"` // 最近五分钟上游 4xx/5xx
 }
 
 // AccountListItemWithConcurrency is the compact account-list envelope used
@@ -220,6 +228,7 @@ type AccountListItemWithConcurrency struct {
 	CurrentWindowCost  *float64                         `json:"current_window_cost,omitempty"`
 	ActiveSessions     *int                             `json:"active_sessions,omitempty"`
 	CurrentRPM         *int                             `json:"current_rpm,omitempty"`
+	UpstreamErrorCount *service.UpstreamErrorCounts     `json:"upstream_error_count,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -716,6 +725,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	concurrencyCounts := make(map[int64]int)
+	upstreamErrorCounts := make(map[int64]service.UpstreamErrorCounts)
 	var windowCosts map[int64]float64
 	var activeSessions map[int64]int
 	var rpmCounts map[int64]int
@@ -738,6 +748,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 	if h.concurrencyService != nil {
 		if cc, ccErr := h.concurrencyService.GetAccountConcurrencyBatch(c.Request.Context(), accountIDs); ccErr == nil && cc != nil {
 			concurrencyCounts = cc
+		}
+	}
+	if h.upstreamErrorCounter != nil {
+		if counts, countErr := h.upstreamErrorCounter.GetAccountUpstreamErrorCounts(c.Request.Context(), accountIDs); countErr == nil && counts != nil {
+			upstreamErrorCounts = counts
 		}
 	}
 
@@ -825,6 +840,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			SchedulerScores:    schedulerGroupScores[acc.ID],
 			Gemini38Scheduler:  gemini38SchedulerStatus(acc),
 		}
+		if counts, ok := upstreamErrorCounts[acc.ID]; ok {
+			item.UpstreamErrorCount = &counts
+		}
 
 		// 添加窗口费用（仅当启用时）
 		if windowCosts != nil {
@@ -865,6 +883,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				CurrentWindowCost:  item.CurrentWindowCost,
 				ActiveSessions:     item.ActiveSessions,
 				CurrentRPM:         item.CurrentRPM,
+				UpstreamErrorCount: item.UpstreamErrorCount,
 			}
 		}
 		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)

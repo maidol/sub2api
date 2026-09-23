@@ -10,6 +10,53 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type recordingUpstreamErrorCounter struct {
+	events []OpsUpstreamErrorEvent
+}
+
+func (c *recordingUpstreamErrorCounter) RecordUpstreamError(_ context.Context, event OpsUpstreamErrorEvent) error {
+	c.events = append(c.events, event)
+	return nil
+}
+
+func (c *recordingUpstreamErrorCounter) GetAccountUpstreamErrorCounts(_ context.Context, accountIDs []int64) (map[int64]UpstreamErrorCounts, error) {
+	counts := make(map[int64]UpstreamErrorCounts, len(accountIDs))
+	for _, accountID := range accountIDs {
+		counts[accountID] = UpstreamErrorCounts{}
+	}
+	return counts, nil
+}
+
+func TestAppendOpsUpstreamErrorRecordsStatusBeforeSkipMonitoring(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	counter := &recordingUpstreamErrorCounter{}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	BindOpsUpstreamErrorCounter(c, counter)
+
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		AccountID:          42,
+		UpstreamStatusCode: 429,
+		Kind:               "retry_exhausted",
+	})
+
+	require.Len(t, counter.events, 1)
+	require.Equal(t, int64(42), counter.events[0].AccountID)
+	require.Equal(t, 429, counter.events[0].UpstreamStatusCode)
+}
+
+func TestAppendOpsUpstreamErrorDoesNotRequireClassificationFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	counter := &recordingUpstreamErrorCounter{}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	BindOpsUpstreamErrorCounter(c, counter)
+
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: 43, UpstreamStatusCode: 500})
+
+	require.Len(t, counter.events, 1)
+	require.Empty(t, counter.events[0].Reason)
+	require.Empty(t, counter.events[0].Detail)
+}
+
 func TestSafeUpstreamURL(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -92,6 +92,22 @@
       </div>
     </div>
 
+    <!-- Recent upstream errors are supplemental and do not replace the account status. -->
+    <div v-if="hasUpstreamErrors" class="group relative">
+      <span
+        class="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+      >
+        <Icon name="exclamationTriangle" size="xs" :stroke-width="2" />
+        {{ t('admin.accounts.status.upstreamErrors') }}
+        <span class="text-[10px] opacity-70">{{ upstreamErrorCounts }}</span>
+      </span>
+      <div
+        class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-max -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-3 py-2 text-center text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+      >
+        {{ t('admin.accounts.status.upstreamErrorsDetail', { client: upstreamErrorCount.client, server: upstreamErrorCount.server }) }}
+      </div>
+    </div>
+
     <!-- Gemini 3.8 routing status is evaluated by the backend scheduler. -->
     <div v-if="gemini38Status" class="group relative">
       <span
@@ -224,6 +240,14 @@ const isRateLimited = computed(() => {
   if (!props.account.rate_limit_reset_at) return false
   return new Date(props.account.rate_limit_reset_at) > new Date()
 })
+
+const upstreamErrorCount = computed(() => props.account.upstream_error_count ?? { client: 0, server: 0 })
+
+const hasUpstreamErrors = computed(() => {
+  return upstreamErrorCount.value.client > 0 || upstreamErrorCount.value.server > 0
+})
+
+const upstreamErrorCounts = computed(() => `${upstreamErrorCount.value.client}/${upstreamErrorCount.value.server}`)
 
 type AccountModelStatusItem = {
   kind: 'rate_limit' | 'credits_exhausted' | 'credits_active'

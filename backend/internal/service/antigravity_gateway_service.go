@@ -237,14 +237,45 @@ func (s *AntigravityGatewayService) handleAntigravityModelRateLimitBeforePolicy(
 	if p.account == nil || p.account.Platform != PlatformAntigravity {
 		return false
 	}
-	_, shouldRateLimitModel, waitDuration, modelName, isModelCapacityExhausted := shouldTriggerAntigravitySmartRetry(p.account, respBody)
-	if isModelCapacityExhausted || !shouldRateLimitModel || strings.TrimSpace(modelName) == "" {
+	info := parseAntigravitySmartRetryInfo(respBody)
+	if info == nil {
+		if statusCode != http.StatusTooManyRequests || antigravityResponseIsStructuredError(respBody) {
+			return false
+		}
+		modelName := resolveFinalAntigravityModelKey(p.ctx, p.account, p.requestedModel)
+		if strings.TrimSpace(modelName) == "" {
+			return false
+		}
+		return s.setAntigravityModelRateLimitBeforePolicy(p, statusCode, modelName, antigravityDefaultRateLimitDuration)
+	}
+	if info.IsModelCapacityExhausted {
+		return false
+	}
+	_, shouldRateLimitModel, waitDuration, modelName, _ := shouldTriggerAntigravitySmartRetry(p.account, respBody)
+	if !shouldRateLimitModel || strings.TrimSpace(modelName) == "" {
 		return false
 	}
 	rateLimitDuration := waitDuration
 	if rateLimitDuration <= 0 {
 		rateLimitDuration = antigravityDefaultRateLimitDuration
 	}
+	return s.setAntigravityModelRateLimitBeforePolicy(p, statusCode, modelName, rateLimitDuration)
+}
+
+func antigravityResponseIsStructuredError(body []byte) bool {
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false
+	}
+	errorValue, ok := parsed["error"]
+	if !ok || string(errorValue) == "null" {
+		return false
+	}
+	var errorObject map[string]json.RawMessage
+	return json.Unmarshal(errorValue, &errorObject) == nil && errorObject != nil
+}
+
+func (s *AntigravityGatewayService) setAntigravityModelRateLimitBeforePolicy(p antigravityRetryLoopParams, statusCode int, modelName string, rateLimitDuration time.Duration) bool {
 	resetAt := time.Now().Add(rateLimitDuration)
 	if !s.setAntigravityModelRateLimits(p.ctx, p.accountRepo, p.account, modelName, p.prefix, statusCode, resetAt, false) {
 		return false

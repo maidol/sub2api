@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const gemini38SchedulerModel = "gemini-3.8-flash"
+const gemini38SchedulerModel = "gemini-3.8-flash-tiered"
 
 type Gemini38SchedulerStatus struct {
 	Supported     bool       `json:"supported"`

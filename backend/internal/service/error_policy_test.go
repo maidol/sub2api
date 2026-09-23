@@ -561,6 +561,128 @@ func TestApplyErrorPolicy(t *testing.T) {
 	}
 }
 
+func TestApplyErrorPolicy_BareAntigravity429RateLimitsRequestedGeminiModel(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	cache := &stubSmartRetryCache{}
+	rlSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc := &AntigravityGatewayService{
+		rateLimitService: rlSvc,
+		accountRepo:      repo,
+		cache:            cache,
+	}
+
+	account := &Account{
+		ID:       32,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(500)},
+			"model_mapping": map[string]any{
+				"gemini-3.8-flash": "gemini-3.8-flash",
+			},
+		},
+	}
+	p := antigravityRetryLoopParams{
+		ctx:            t.Context(),
+		prefix:         "[test]",
+		account:        account,
+		accountRepo:    repo,
+		requestedModel: "gemini-3.8-flash",
+		groupID:        43,
+		sessionHash:    "gemini-3.8:sticky",
+	}
+
+	handled, outStatus, retErr := svc.applyErrorPolicy(p, http.StatusTooManyRequests, http.Header{}, []byte("rate limited"))
+
+	require.True(t, handled)
+	require.Equal(t, http.StatusTooManyRequests, outStatus)
+	require.NoError(t, retErr)
+	require.Len(t, repo.modelRateLimitCalls, 2)
+	require.Equal(t, "gemini-3.8-flash", repo.modelRateLimitCalls[0].modelKey)
+	require.Equal(t, antigravityGeminiModelRateLimitKey, repo.modelRateLimitCalls[1].modelKey)
+	require.Len(t, cache.deleteCalls, 1)
+	require.Equal(t, int64(43), cache.deleteCalls[0].groupID)
+	require.Equal(t, "gemini-3.8:sticky", cache.deleteCalls[0].sessionHash)
+}
+
+func TestApplyErrorPolicy_BareAntigravity429DoesNotFallbackForInvalidStructuredBody(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "invalid details", body: `{"error":{"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"OTHER"}]}}`},
+		{name: "missing details", body: `{"error":{"status":"RESOURCE_EXHAUSTED"}}`},
+		{name: "null details", body: `{"error":{"status":"RESOURCE_EXHAUSTED","details":null}}`},
+		{name: "empty details", body: `{"error":{"status":"RESOURCE_EXHAUSTED","details":[]}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &stubAntigravityAccountRepo{}
+			rlSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			svc := &AntigravityGatewayService{rateLimitService: rlSvc, accountRepo: repo}
+			account := &Account{
+				ID:       33,
+				Type:     AccountTypeAPIKey,
+				Platform: PlatformAntigravity,
+				Credentials: map[string]any{
+					"custom_error_codes_enabled": true,
+					"custom_error_codes":         []any{float64(500)},
+					"model_mapping": map[string]any{
+						"gemini-3.8-flash": "gemini-3.8-flash",
+					},
+				},
+			}
+			p := antigravityRetryLoopParams{
+				ctx:            t.Context(),
+				prefix:         "[test]",
+				account:        account,
+				accountRepo:    repo,
+				requestedModel: "gemini-3.8-flash",
+			}
+
+			handled, outStatus, retErr := svc.applyErrorPolicy(p, http.StatusTooManyRequests, http.Header{}, []byte(tt.body))
+
+			require.True(t, handled)
+			require.Equal(t, http.StatusInternalServerError, outStatus)
+			require.NoError(t, retErr)
+			require.Empty(t, repo.modelRateLimitCalls)
+		})
+	}
+}
+
+func TestApplyErrorPolicy_BareAntigravity503DoesNotFallback(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	rlSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc := &AntigravityGatewayService{rateLimitService: rlSvc, accountRepo: repo}
+	account := &Account{
+		ID:       34,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(429)},
+			"model_mapping": map[string]any{
+				"gemini-3.8-flash": "gemini-3.8-flash",
+			},
+		},
+	}
+	p := antigravityRetryLoopParams{
+		ctx:            t.Context(),
+		prefix:         "[test]",
+		account:        account,
+		accountRepo:    repo,
+		requestedModel: "gemini-3.8-flash",
+	}
+
+	handled, outStatus, retErr := svc.applyErrorPolicy(p, http.StatusServiceUnavailable, http.Header{}, []byte("temporarily unavailable"))
+
+	require.True(t, handled)
+	require.Equal(t, http.StatusInternalServerError, outStatus)
+	require.NoError(t, retErr)
+	require.Empty(t, repo.modelRateLimitCalls)
+}
+
 func TestApplyErrorPolicy_GeminiRateLimitBypassesCustomSkip(t *testing.T) {
 	repo := &stubAntigravityAccountRepo{}
 	cache := &stubSmartRetryCache{}

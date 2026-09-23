@@ -244,7 +244,7 @@ describe('AccountStatusIndicator', () => {
           },
           extra: {
             model_rate_limits: {
-              'gemini-3.8-flash-medium': {
+              'gemini-3.8-flash-tiered': {
                 rate_limited_at: '2026-03-15T00:00:00Z',
                 rate_limit_reset_at: '2099-03-15T00:00:00Z'
               },
@@ -317,5 +317,33 @@ describe('AccountStatusIndicator', () => {
     expect(wrapper.text()).not.toContain('⚡')
     // AICredits 积分耗尽状态应显示
     expect(wrapper.text()).toContain('admin.accounts.status.creditsExhausted')
+  })
+
+  it('renders upstream error warning counts without replacing an error account status', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          status: 'error',
+          upstream_error_count: { client: 2, server: 1 }
+        })
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('admin.accounts.status.error')
+    expect(wrapper.text()).toContain('admin.accounts.status.upstreamErrors')
+    expect(wrapper.text()).toContain('2/1')
+  })
+
+  it.each([
+    undefined,
+    { client: 0, server: 0 }
+  ])('does not render an upstream error warning for %o', (upstream_error_count) => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: { account: makeAccount({ upstream_error_count }) },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).not.toContain('admin.accounts.status.upstreamErrors')
   })
 })

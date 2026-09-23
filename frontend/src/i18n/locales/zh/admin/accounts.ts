@@ -446,6 +446,8 @@ export default {
         gemini38Overages: 'Gemini 3.8 Credits',
         gemini38RateLimitedUntil: 'Gemini 3.8 限流至 {time}',
         gemini38CreditsExhaustedUntil: 'Gemini 3.8 AI Credits 已耗尽，预计 {time} 恢复',
+        upstreamErrors: '上游错误',
+        upstreamErrorsDetail: '最近 5 分钟上游错误：客户端 {client} / 服务端 {server}',
         creditsExhausted: '积分已用尽',
         creditsExhaustedUntil: 'AI Credits 已用尽，预计 {time} 恢复',
         overloadedUntil: '负载过重，重置时间：{time}',

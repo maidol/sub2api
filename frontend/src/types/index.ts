@@ -1264,6 +1264,10 @@ export interface Account {
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
   status: 'active' | 'inactive' | 'error'
   error_message: string | null
+  upstream_error_count?: {
+    client: number
+    server: number
+  }
   last_used_at: string | null
   expires_at: number | null
   auto_pause_on_expired: boolean

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -429,6 +430,50 @@ type OpsUpstreamErrorEvent struct {
 	SkipMonitoring bool `json:"-"`
 }
 
+type UpstreamErrorCounter interface {
+	RecordUpstreamError(ctx context.Context, event OpsUpstreamErrorEvent) error
+	GetAccountUpstreamErrorCounts(ctx context.Context, accountIDs []int64) (map[int64]UpstreamErrorCounts, error)
+}
+
+type UpstreamErrorCounts struct {
+	Client int `json:"client"`
+	Server int `json:"server"`
+}
+
+const upstreamErrorCounterContextKey = "upstream_error_counter"
+
+func BindOpsUpstreamErrorCounter(c *gin.Context, counter UpstreamErrorCounter) {
+	if c != nil && counter != nil {
+		c.Set(upstreamErrorCounterContextKey, counter)
+	}
+}
+
+func getBoundOpsUpstreamErrorCounter(c *gin.Context) UpstreamErrorCounter {
+	if c == nil {
+		return nil
+	}
+	value, exists := c.Get(upstreamErrorCounterContextKey)
+	if !exists {
+		return nil
+	}
+	counter, _ := value.(UpstreamErrorCounter)
+	return counter
+}
+
+func recordOpsUpstreamError(c *gin.Context, event OpsUpstreamErrorEvent) {
+	counter := getBoundOpsUpstreamErrorCounter(c)
+	if counter == nil {
+		return
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer cancel()
+	_ = counter.RecordUpstreamError(ctx, event)
+}
+
 const (
 	opsProxyNameDirect  = "direct/no_proxy"
 	opsProxyNameUnknown = "unknown"
@@ -470,6 +515,7 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	existing = append(existing, &evCopy)
 	c.Set(OpsUpstreamErrorsKey, existing)
 
+	recordOpsUpstreamError(c, evCopy)
 	checkSkipMonitoringForUpstreamEvent(c, &evCopy)
 }
 

@@ -243,6 +243,8 @@ export default {
         gemini38Overages: 'Gemini 3.8 Credits',
         gemini38RateLimitedUntil: 'Gemini 3.8 rate limited until {time}',
         gemini38CreditsExhaustedUntil: 'Gemini 3.8 AI Credits exhausted, expected recovery at {time}',
+        upstreamErrors: 'Upstream Errors',
+        upstreamErrorsDetail: 'Last 5 min upstream errors: {client} client / {server} server',
         creditsExhausted: 'Credits Exhausted',
         creditsExhaustedUntil: 'AI Credits exhausted, expected recovery at {time}',
         overloadedUntil: 'Overloaded until {time}',
