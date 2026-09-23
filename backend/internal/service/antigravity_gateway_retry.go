@@ -636,6 +636,24 @@ urlFallbackLoop:
 					smartResult := s.handleSmartRetry(p, resp, respBody, baseURL, urlIdx, availableURLs)
 					switch smartResult.action {
 					case smartRetryActionContinueURL:
+						// URL 级降级前先记一笔：否则被降级掉的这一跳在 ops 事件里完全不存在，
+						// 只剩最后那个 host，运维无法区分「转发 base URL 未生效」与「已生效但回退」。
+						// 连接错误那条降级路径（见上方 request_error 分支）本来就是先记再降级。
+						upstreamMsg := strings.TrimSpace(extractAntigravityErrorMessage(respBody))
+						upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+						appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
+							ProxyID:            opsUpstreamProxyID(p.account),
+							ProxyName:          opsUpstreamProxyName(p.account),
+							Platform:           p.account.Platform,
+							AccountID:          p.account.ID,
+							AccountName:        p.account.Name,
+							UpstreamStatusCode: resp.StatusCode,
+							UpstreamRequestID:  resp.Header.Get("x-request-id"),
+							UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+							Kind:               "url_fallback",
+							Message:            upstreamMsg,
+							Detail:             getUpstreamDetail(respBody),
+						})
 						continue urlFallbackLoop
 					case smartRetryActionBreakWithResp:
 						if smartResult.err != nil {
