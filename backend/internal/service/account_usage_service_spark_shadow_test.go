@@ -82,7 +82,7 @@ func TestGetOpenAIUsage_FreeOAuth_UsesTopLevelRateLimit(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	quotaService := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	quotaService := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv), nil)
 	svc := &AccountUsageService{accountRepo: repo, openAIQuotaService: quotaService}
 
 	usage, err := svc.getOpenAIUsage(ctx, free, true)
