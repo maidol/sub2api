@@ -70,6 +70,35 @@ func resolveAntigravityForwardBaseURL(account *Account) string {
 	return baseURLs[0]
 }
 
+// resolveAntigravityForwardBaseURLs 解析转发候选 URL 列表。
+// 优先使用当前账号解析出的首选 base URL，其他已知 BaseURLs 追加在后作为 fallback，
+// 并通过 DefaultURLAvailability 过滤掉冷却中的不可用 URL（保持每账号决定的相对顺序，不被全局 lastSuccess 覆盖）。
+// 若全部被标记不可用，则兜底返回原始候选顺序。
+func resolveAntigravityForwardBaseURLs(account *Account) []string {
+	primary := resolveAntigravityForwardBaseURL(account)
+	if primary == "" {
+		return nil
+	}
+	urls := []string{primary}
+	for _, u := range antigravity.BaseURLs {
+		if u != primary {
+			urls = append(urls, u)
+		}
+	}
+	if antigravity.DefaultURLAvailability != nil {
+		filtered := make([]string, 0, len(urls))
+		for _, u := range urls {
+			if antigravity.DefaultURLAvailability.IsAvailable(u) {
+				filtered = append(filtered, u)
+			}
+		}
+		if len(filtered) > 0 {
+			return filtered
+		}
+	}
+	return urls
+}
+
 func accountHasAntigravityPaidTier(account *Account) bool {
 	if account == nil || account.Credentials == nil {
 		return false
@@ -504,11 +533,10 @@ func (s *AntigravityGatewayService) antigravityRetryLoop(p antigravityRetryLoopP
 		}
 	}
 
-	baseURL := resolveAntigravityForwardBaseURL(p.account)
-	if baseURL == "" {
+	availableURLs := resolveAntigravityForwardBaseURLs(p.account)
+	if len(availableURLs) == 0 {
 		return nil, errors.New("no antigravity forward base url configured")
 	}
-	availableURLs := []string{baseURL}
 
 	var resp *http.Response
 	var usedBaseURL string
@@ -731,8 +759,13 @@ func shouldRetryAntigravityError(statusCode int) bool {
 }
 
 // isURLLevelRateLimit 判断是否为 URL 级别的限流（应切换 URL 重试）
-// "Resource has been exhausted" 是 URL/节点级别限流，切换 URL 可能成功
-// "exhausted your capacity on this model" 是账户/模型配额限流，切换 URL 无效
+// "Resource has been exhausted" 是 URL/节点级别限流，切换 URL 可能成功。
+// "exhausted your capacity on this model" 是账户/模型配额限流，切换 URL 无效。
+//
+// 注：与 antigravity_gateway_service.go 中的 antigravityResponseIsSparseResourceExhausted
+// 形成语义划分：在 OAuth 智能重试流程中，少字段的 429 会先通过此函数判断是否能切换 URL 自愈；
+// 而对于开启自定义错误码策略的场景（主要是 APIKey 模式），该错误由
+// antigravityResponseIsSparseResourceExhausted 兜底写入模型级限流，避免漏判降级为 500。
 func isURLLevelRateLimit(body []byte) bool {
 	// 快速检查：包含 "Resource has been exhausted" 且不包含 "capacity on this model"
 	bodyStr := string(body)

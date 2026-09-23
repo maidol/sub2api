@@ -4,8 +4,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -25,6 +27,7 @@ var _ SchedulerCache = (*stubSchedulerCache)(nil)
 type stubAntigravityUpstream struct {
 	firstBase  string
 	secondBase string
+	firstErr   error
 	calls      []string
 }
 
@@ -49,6 +52,9 @@ func (s *stubAntigravityUpstream) Do(req *http.Request, proxyURL string, account
 	url := req.URL.String()
 	s.calls = append(s.calls, url)
 	if strings.HasPrefix(url, s.firstBase) {
+		if s.firstErr != nil {
+			return nil, s.firstErr
+		}
 		return &http.Response{
 			StatusCode: http.StatusTooManyRequests,
 			Header:     http.Header{},
@@ -104,7 +110,7 @@ func (s *stubAntigravityAccountRepo) UpdateExtra(ctx context.Context, id int64, 
 	return nil
 }
 
-func TestAntigravityRetryLoop_NoURLFallback_UsesConfiguredBaseURL(t *testing.T) {
+func TestAntigravityRetryLoop_URLFallback_429ResourceExhausted(t *testing.T) {
 	t.Setenv(antigravityForwardBaseURLEnv, "")
 
 	oldBaseURLs := append([]string(nil), antigravity.BaseURLs...)
@@ -151,16 +157,121 @@ func TestAntigravityRetryLoop_NoURLFallback_UsesConfiguredBaseURL(t *testing.T) 
 	require.NotNil(t, result)
 	require.NotNil(t, result.resp)
 	defer func() { _ = result.resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, result.resp.StatusCode)
+	require.False(t, handleErrorCalled)
+	require.Len(t, upstream.calls, 2)
+	require.True(t, strings.HasPrefix(upstream.calls[0], base1))
+	require.True(t, strings.HasPrefix(upstream.calls[1], base2))
+
+	available := antigravity.DefaultURLAvailability.GetAvailableURLs()
+	require.NotEmpty(t, available)
+	require.Equal(t, base2, available[0])
+}
+
+func TestAntigravityRetryLoop_URLFallback_ConnectionError(t *testing.T) {
+	t.Setenv(antigravityForwardBaseURLEnv, "")
+
+	oldBaseURLs := append([]string(nil), antigravity.BaseURLs...)
+	oldAvailability := antigravity.DefaultURLAvailability
+	defer func() {
+		antigravity.BaseURLs = oldBaseURLs
+		antigravity.DefaultURLAvailability = oldAvailability
+	}()
+
+	base1 := "https://ag-conn-1.test"
+	base2 := "https://ag-conn-2.test"
+	antigravity.BaseURLs = []string{base1, base2}
+	antigravity.DefaultURLAvailability = antigravity.NewURLAvailability(time.Minute)
+
+	upstream := &stubAntigravityUpstream{
+		firstBase:  base1,
+		secondBase: base2,
+		firstErr:   &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")},
+	}
+	account := &Account{
+		ID:          1,
+		Name:        "acc-1",
+		Platform:    PlatformAntigravity,
+		Schedulable: true,
+		Status:      StatusActive,
+		Concurrency: 1,
+	}
+
+	svc := &AntigravityGatewayService{}
+	result, err := svc.antigravityRetryLoop(antigravityRetryLoopParams{
+		prefix:         "[test]",
+		ctx:            context.Background(),
+		account:        account,
+		proxyURL:       "",
+		accessToken:    "token",
+		action:         "generateContent",
+		body:           []byte(`{"input":"test"}`),
+		httpUpstream:   upstream,
+		requestedModel: "claude-sonnet-4-5",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.resp)
+	defer func() { _ = result.resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, result.resp.StatusCode)
+	require.Len(t, upstream.calls, 2)
+	require.True(t, strings.HasPrefix(upstream.calls[0], base1))
+	require.True(t, strings.HasPrefix(upstream.calls[1], base2))
+}
+
+func TestAntigravityRetryLoop_URLFallback_NegativeSingleURLFails(t *testing.T) {
+	t.Setenv(antigravityForwardBaseURLEnv, "")
+
+	oldBaseURLs := append([]string(nil), antigravity.BaseURLs...)
+	oldAvailability := antigravity.DefaultURLAvailability
+	defer func() {
+		antigravity.BaseURLs = oldBaseURLs
+		antigravity.DefaultURLAvailability = oldAvailability
+	}()
+
+	base1 := "https://ag-single.test"
+	antigravity.BaseURLs = []string{base1}
+	antigravity.DefaultURLAvailability = antigravity.NewURLAvailability(time.Minute)
+
+	upstream := &stubAntigravityUpstream{firstBase: base1}
+	account := &Account{
+		ID:          1,
+		Name:        "acc-1",
+		Platform:    PlatformAntigravity,
+		Schedulable: true,
+		Status:      StatusActive,
+		Concurrency: 1,
+	}
+
+	var handleErrorCalled bool
+	svc := &AntigravityGatewayService{}
+	result, err := svc.antigravityRetryLoop(antigravityRetryLoopParams{
+		prefix:         "[test]",
+		ctx:            context.Background(),
+		account:        account,
+		proxyURL:       "",
+		accessToken:    "token",
+		action:         "generateContent",
+		body:           []byte(`{"input":"test"}`),
+		httpUpstream:   upstream,
+		requestedModel: "claude-sonnet-4-5",
+		handleError: func(ctx context.Context, prefix string, account *Account, statusCode int, headers http.Header, body []byte, requestedModel string, groupID int64, sessionHash string, isStickySession bool) *handleModelRateLimitResult {
+			handleErrorCalled = true
+			return nil
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.resp)
+	defer func() { _ = result.resp.Body.Close() }()
 	require.Equal(t, http.StatusTooManyRequests, result.resp.StatusCode)
 	require.True(t, handleErrorCalled)
 	require.Len(t, upstream.calls, antigravityMaxRetries)
 	for _, callURL := range upstream.calls {
 		require.True(t, strings.HasPrefix(callURL, base1))
 	}
-
-	available := antigravity.DefaultURLAvailability.GetAvailableURLs()
-	require.NotEmpty(t, available)
-	require.Equal(t, base1, available[0])
 }
 
 // TestHandleUpstreamError_429_ModelRateLimit 测试 429 模型限流场景
@@ -1215,6 +1326,71 @@ func TestResolveAntigravityForwardBaseURL(t *testing.T) {
 			require.Equal(t, tt.want, resolveAntigravityForwardBaseURL(tt.account))
 		})
 	}
+
+	t.Run("resolveAntigravityForwardBaseURLs orders primary first and others as fallback", func(t *testing.T) {
+		t.Setenv(antigravityForwardBaseURLEnv, "")
+		paidAccount := &Account{Credentials: map[string]any{"plan_type": "pro"}}
+		freeAccount := &Account{Credentials: map[string]any{"plan_type": "free"}}
+
+		paidURLs := resolveAntigravityForwardBaseURLs(paidAccount)
+		require.Equal(t, []string{dailyURL, prodURL}, paidURLs)
+
+		freeURLs := resolveAntigravityForwardBaseURLs(freeAccount)
+		require.Equal(t, []string{prodURL, dailyURL}, freeURLs)
+	})
+
+	t.Run("resolveAntigravityForwardBaseURLs filters unavailable and recovers when all unavailable", func(t *testing.T) {
+		t.Setenv(antigravityForwardBaseURLEnv, "")
+		paidAccount := &Account{Credentials: map[string]any{"plan_type": "pro"}}
+
+		ua := antigravity.NewURLAvailability(time.Minute)
+		ua.MarkUnavailable(dailyURL)
+		oldAvailability := antigravity.DefaultURLAvailability
+		antigravity.DefaultURLAvailability = ua
+		defer func() {
+			antigravity.DefaultURLAvailability = oldAvailability
+		}()
+
+		urls := resolveAntigravityForwardBaseURLs(paidAccount)
+		require.Equal(t, []string{prodURL}, urls)
+
+		ua.MarkUnavailable(prodURL)
+		fallbackAll := resolveAntigravityForwardBaseURLs(paidAccount)
+		require.Equal(t, []string{dailyURL, prodURL}, fallbackAll)
+	})
+
+	t.Run("resolveAntigravityForwardBaseURLs preserves per-account primary and does not let global lastSuccess override free account", func(t *testing.T) {
+		t.Setenv(antigravityForwardBaseURLEnv, "")
+		paidAccount := &Account{Credentials: map[string]any{"plan_type": "pro"}}
+		freeAccount := &Account{Credentials: map[string]any{"plan_type": "free"}}
+
+		ua := antigravity.NewURLAvailability(time.Minute)
+		oldAvailability := antigravity.DefaultURLAvailability
+		antigravity.DefaultURLAvailability = ua
+		defer func() {
+			antigravity.DefaultURLAvailability = oldAvailability
+		}()
+
+		// 步骤 1: 干净状态下，付费账号解析出 daily 优先
+		paidURLs1 := resolveAntigravityForwardBaseURLs(paidAccount)
+		require.Equal(t, dailyURL, paidURLs1[0])
+
+		// 步骤 2: 付费账号请求成功，触发全局 MarkSuccess(dailyURL)
+		ua.MarkSuccess(dailyURL)
+
+		// 步骤 3: 紧接着免费账号发起请求，其第一跳必须仍然是 prodURL（不能被全局 lastSuccess 改道成 dailyURL）
+		freeURLs := resolveAntigravityForwardBaseURLs(freeAccount)
+		require.Equal(t, prodURL, freeURLs[0], "free account primary URL must remain prod even after another account succeeded on daily")
+		require.Equal(t, []string{prodURL, dailyURL}, freeURLs)
+
+		// 步骤 4: 若 prod 账号请求成功，触发 MarkSuccess(prodURL)
+		ua.MarkSuccess(prodURL)
+
+		// 付费账号的第一跳依然保持 daily 优先（不受 prod 成功记录影响）
+		paidURLs2 := resolveAntigravityForwardBaseURLs(paidAccount)
+		require.Equal(t, dailyURL, paidURLs2[0], "paid account primary URL must remain daily even after another account succeeded on prod")
+		require.Equal(t, []string{dailyURL, prodURL}, paidURLs2)
+	})
 }
 
 func TestAntigravityAccountSwitchError_Error(t *testing.T) {
