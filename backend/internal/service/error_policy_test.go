@@ -612,9 +612,9 @@ func TestApplyErrorPolicy_BareAntigravity429DoesNotFallbackForInvalidStructuredB
 		body string
 	}{
 		{name: "invalid details", body: `{"error":{"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"OTHER"}]}}`},
-		{name: "missing details", body: `{"error":{"status":"RESOURCE_EXHAUSTED"}}`},
-		{name: "null details", body: `{"error":{"status":"RESOURCE_EXHAUSTED","details":null}}`},
-		{name: "empty details", body: `{"error":{"status":"RESOURCE_EXHAUSTED","details":[]}}`},
+		{name: "null details with invalid status", body: `{"error":{"status":"OTHER","details":null}}`},
+		{name: "empty details with invalid status", body: `{"error":{"status":"OTHER","details":[]}}`},
+		{name: "other structured error", body: `{"error":{"code":400,"message":"bad request"}}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -647,6 +647,77 @@ func TestApplyErrorPolicy_BareAntigravity429DoesNotFallbackForInvalidStructuredB
 			require.Equal(t, http.StatusInternalServerError, outStatus)
 			require.NoError(t, retErr)
 			require.Empty(t, repo.modelRateLimitCalls)
+		})
+	}
+}
+
+func TestApplyErrorPolicy_ProdSparseAntigravity429RateLimitsRequestedModel(t *testing.T) {
+	sparsePayloads := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "prod_bare_429",
+			body: `{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}`,
+		},
+		{
+			name: "status_only_429",
+			body: `{"error":{"status":"RESOURCE_EXHAUSTED"}}`,
+		},
+		{
+			name: "null_details_resource_exhausted_429",
+			body: `{"error":{"status":"RESOURCE_EXHAUSTED","details":null}}`,
+		},
+		{
+			name: "empty_details_resource_exhausted_429",
+			body: `{"error":{"status":"RESOURCE_EXHAUSTED","details":[]}}`,
+		},
+	}
+
+	for _, tt := range sparsePayloads {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &stubAntigravityAccountRepo{}
+			cache := &stubSmartRetryCache{}
+			rlSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			svc := &AntigravityGatewayService{
+				rateLimitService: rlSvc,
+				accountRepo:      repo,
+				cache:            cache,
+			}
+
+			account := &Account{
+				ID:       35,
+				Type:     AccountTypeAPIKey,
+				Platform: PlatformAntigravity,
+				Credentials: map[string]any{
+					"custom_error_codes_enabled": true,
+					"custom_error_codes":         []any{float64(500)},
+					"model_mapping": map[string]any{
+						"gemini-3.8-flash": "gemini-3.8-flash",
+					},
+				},
+			}
+			p := antigravityRetryLoopParams{
+				ctx:            t.Context(),
+				prefix:         "[test]",
+				account:        account,
+				accountRepo:    repo,
+				requestedModel: "gemini-3.8-flash",
+				groupID:        44,
+				sessionHash:    "gemini-3.8:sparse_sticky",
+			}
+
+			handled, outStatus, retErr := svc.applyErrorPolicy(p, http.StatusTooManyRequests, http.Header{}, []byte(tt.body))
+
+			require.True(t, handled)
+			require.Equal(t, http.StatusTooManyRequests, outStatus)
+			require.NoError(t, retErr)
+			require.Len(t, repo.modelRateLimitCalls, 2)
+			require.Equal(t, "gemini-3.8-flash", repo.modelRateLimitCalls[0].modelKey)
+			require.Equal(t, antigravityGeminiModelRateLimitKey, repo.modelRateLimitCalls[1].modelKey)
+			require.Len(t, cache.deleteCalls, 1)
+			require.Equal(t, int64(44), cache.deleteCalls[0].groupID)
+			require.Equal(t, "gemini-3.8:sparse_sticky", cache.deleteCalls[0].sessionHash)
 		})
 	}
 }
