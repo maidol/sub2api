@@ -36,7 +36,7 @@ func TestGetOpenAIUsage_FreeOAuth_ForceRefreshDropsStaleFiveHourInSameResponse(t
 	}))
 	defer srv.Close()
 
-	quotaService := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv))
+	quotaService := NewOpenAIQuotaService(repo, nil, tokenProvider, newQuotaRedirectingFactory(srv), nil)
 	svc := &AccountUsageService{accountRepo: repo, openAIQuotaService: quotaService, usageLogRepo: &phantomFiveHourUsageLogRepo{}}
 	usage, err := svc.getOpenAIUsage(ctx, free, true)
 	require.NoError(t, err)
