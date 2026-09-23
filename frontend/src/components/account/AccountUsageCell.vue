@@ -337,41 +337,17 @@
 
       <!-- 回落：逐模型清单 -->
       <div v-else-if="hasAntigravityQuotaFromAPI" class="space-y-1">
-        <!-- Gemini 3 Pro -->
-        <UsageProgressBar
-          v-if="antigravity3ProUsageFromAPI !== null"
-          :label="t('admin.accounts.usageWindow.gemini3Pro')"
-          :utilization="antigravity3ProUsageFromAPI.utilization"
-          :resets-at="antigravity3ProUsageFromAPI.resetTime"
-          color="indigo"
-        />
-
-        <!-- Gemini 3 Flash -->
-        <UsageProgressBar
-          v-if="antigravity3FlashUsageFromAPI !== null"
-          :label="t('admin.accounts.usageWindow.gemini3Flash')"
-          :utilization="antigravity3FlashUsageFromAPI.utilization"
-          :resets-at="antigravity3FlashUsageFromAPI.resetTime"
-          color="emerald"
-        />
-
-        <!-- Gemini 3 Image -->
-        <UsageProgressBar
-          v-if="antigravity3ImageUsageFromAPI !== null"
-          :label="t('admin.accounts.usageWindow.gemini3Image')"
-          :utilization="antigravity3ImageUsageFromAPI.utilization"
-          :resets-at="antigravity3ImageUsageFromAPI.resetTime"
-          color="purple"
-        />
-
-        <!-- Claude -->
-        <UsageProgressBar
-          v-if="antigravityClaudeUsageFromAPI !== null"
-          :label="t('admin.accounts.usageWindow.claude')"
-          :utilization="antigravityClaudeUsageFromAPI.utilization"
-          :resets-at="antigravityClaudeUsageFromAPI.resetTime"
-          color="amber"
-        />
+        <div class="max-h-36 overflow-y-auto pr-0.5 space-y-1">
+          <UsageProgressBar
+            v-for="item in antigravityQuotaItemsFromAPI"
+            :key="item.key"
+            :label="item.label"
+            :utilization="item.utilization"
+            :resets-at="item.resetTime"
+            :color="item.color"
+            label-width="auto"
+          />
+        </div>
 
         <div v-if="aiCreditsDisplay" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
           💳 {{ t('admin.accounts.aiCreditsBalance') }}: {{ aiCreditsDisplay }}
@@ -876,9 +852,12 @@ const shouldLazyLoadOnMobile = computed(() => {
 })
 
 // Antigravity quota types (用于 API 返回的数据)
-interface AntigravityUsageResult {
+interface AntigravityUsageProgressItem {
+  key: string
+  label: string
   utilization: number
   resetTime: string | null
+  color: 'indigo' | 'emerald' | 'purple' | 'amber'
 }
 
 // ===== Antigravity quota from API (usageInfo.antigravity_quota) =====
@@ -888,65 +867,70 @@ const hasAntigravityQuotaFromAPI = computed(() => {
   return usageInfo.value?.antigravity_quota && Object.keys(usageInfo.value.antigravity_quota).length > 0
 })
 
-// 从 API 配额数据中获取使用率（多模型取最高使用率）
-const getAntigravityUsageFromAPI = (
-  modelNames: string[]
-): AntigravityUsageResult | null => {
+// 模型家族定义（用于配色和排序）
+const antigravityFamilyRules: Array<{
+  prefix: string
+  color: 'indigo' | 'emerald' | 'purple' | 'amber'
+  priority: number
+}> = [
+  { prefix: 'gemini-3-pro', color: 'indigo', priority: 1 },
+  { prefix: 'gemini-3.1-pro', color: 'indigo', priority: 2 },
+  { prefix: 'gemini-2.5-pro', color: 'indigo', priority: 3 },
+  { prefix: 'gemini-3.8-flash', color: 'emerald', priority: 4 },
+  { prefix: 'gemini-3.7-flash', color: 'emerald', priority: 5 },
+  { prefix: 'gemini-3.6-flash', color: 'emerald', priority: 6 },
+  { prefix: 'gemini-3-flash', color: 'emerald', priority: 7 },
+  { prefix: 'gemini-2.5-flash', color: 'emerald', priority: 8 },
+  { prefix: 'gemini-2.0-flash', color: 'emerald', priority: 9 },
+  { prefix: 'gemini-3.1-flash-image', color: 'purple', priority: 10 },
+  { prefix: 'gemini-2.5-flash-image', color: 'purple', priority: 11 },
+  { prefix: 'gemini-3-pro-image', color: 'purple', priority: 12 },
+  { prefix: 'claude', color: 'amber', priority: 13 }
+]
+
+// 依据 antigravity_quota 和 antigravity_quota_details 数据驱动生成进度条项目
+const antigravityQuotaItemsFromAPI = computed<AntigravityUsageProgressItem[]>(() => {
   const quota = usageInfo.value?.antigravity_quota
-  if (!quota) return null
+  if (!quota) return []
 
-  let maxUtilization = 0
-  let earliestReset: string | null = null
+  const details = usageInfo.value?.antigravity_quota_details || {}
+  const items: Array<AntigravityUsageProgressItem & { priority: number }> = []
 
-  for (const model of modelNames) {
-    const modelQuota = quota[model]
+  for (const [modelKey, modelQuota] of Object.entries(quota)) {
     if (!modelQuota) continue
 
-    if (modelQuota.utilization > maxUtilization) {
-      maxUtilization = modelQuota.utilization
-    }
-    if (modelQuota.reset_time) {
-      if (!earliestReset || modelQuota.reset_time < earliestReset) {
-        earliestReset = modelQuota.reset_time
+    const detail = details[modelKey]
+    const label = detail?.display_name?.trim() || modelKey
+
+    let color: 'indigo' | 'emerald' | 'purple' | 'amber' = 'indigo'
+    let priority = 999
+
+    for (const rule of antigravityFamilyRules) {
+      if (modelKey.startsWith(rule.prefix)) {
+        color = rule.color
+        priority = rule.priority
+        break
       }
     }
+
+    items.push({
+      key: modelKey,
+      label,
+      utilization: modelQuota.utilization,
+      resetTime: modelQuota.reset_time || null,
+      color,
+      priority
+    })
   }
 
-  // 如果没有找到任何匹配的模型
-  if (maxUtilization === 0 && earliestReset === null) {
-    const hasAnyData = modelNames.some((m) => quota[m])
-    if (!hasAnyData) return null
-  }
-
-  return {
-    utilization: maxUtilization,
-    resetTime: earliestReset
-  }
-}
-
-// Gemini 3 Pro from API
-const antigravity3ProUsageFromAPI = computed(() =>
-  getAntigravityUsageFromAPI(['gemini-3-pro-low', 'gemini-3-pro-high', 'gemini-3-pro-preview'])
-)
-
-// Gemini 3 Flash from API
-const antigravity3FlashUsageFromAPI = computed(() => getAntigravityUsageFromAPI(['gemini-3-flash']))
-
-// Gemini Image from API
-const antigravity3ImageUsageFromAPI = computed(() =>
-  getAntigravityUsageFromAPI(['gemini-2.5-flash-image', 'gemini-3.1-flash-image', 'gemini-3-pro-image'])
-)
-
-// Claude from API (all Claude model variants)
-const antigravityClaudeUsageFromAPI = computed(() =>
-  getAntigravityUsageFromAPI([
-    'claude-fable-5-1',
-    'claude-fable-5',
-    'claude-sonnet-4-5', 'claude-opus-4-5-thinking',
-    'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-opus-4-6-thinking',
-    'claude-opus-4-7', 'claude-opus-4-8',
-  ])
-)
+  // 排序：先按已知家族规则优先度，再按 label 字母顺序
+  return items.sort((a, b) => {
+    if (a.priority !== b.priority) {
+      return a.priority - b.priority
+    }
+    return a.key.localeCompare(b.key)
+  })
+})
 
 // ===== Antigravity 家族池（后端 antigravity_pools）=====
 // 后端只在同池内数值一致时才下发这个字段；不一致时它是空的，

@@ -240,21 +240,27 @@ describe('AccountUsageCell', () => {
     expect(wrapper.find('[data-test="embedded-ollama"]').exists()).toBe(false)
   })
 
-  it('Antigravity 图片用量会聚合新旧 image 模型', async () => {
+  it('Antigravity 配额数据驱动渲染：优先使用 display_name、无 details 时回退到原始 key、并渲染任意非硬编码模型', async () => {
     getUsage.mockResolvedValue({
       antigravity_quota: {
-        'gemini-2.5-flash-image': {
-          utilization: 45,
-          reset_time: '2026-03-01T11:00:00Z'
-        },
-        'gemini-3.1-flash-image': {
-          utilization: 20,
+        'gemini-3.8-flash-tiered': {
+          utilization: 42,
           reset_time: '2026-03-01T10:00:00Z'
         },
-        'gemini-3-pro-image': {
-          utilization: 70,
-          reset_time: '2026-03-01T09:00:00Z'
+        'gemini-2.5-pro': {
+          utilization: 15,
+          reset_time: '2026-03-01T11:00:00Z'
+        },
+        'foo-bar-9': {
+          utilization: 88,
+          reset_time: '2026-03-01T12:00:00Z'
         }
+      },
+      antigravity_quota_details: {
+        'gemini-3.8-flash-tiered': {
+          display_name: 'Gemini 3.8 Flash'
+        }
+        // gemini-2.5-pro 与 foo-bar-9 无 display_name
       }
     })
 
@@ -280,7 +286,18 @@ describe('AccountUsageCell', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('admin.accounts.usageWindow.gemini3Image|70|2026-03-01T09:00:00Z')
+    const text = wrapper.text()
+    // 1. 有 display_name 时使用 display_name 且数值正确
+    expect(text).toContain('Gemini 3.8 Flash|42|2026-03-01T10:00:00Z')
+    // 2. 无 display_name 时回退到原始 key 而不是空标签
+    expect(text).toContain('gemini-2.5-pro|15|2026-03-01T11:00:00Z')
+    // 3. 任意未知/非硬编码模型同样被正常渲染，证明摆脱硬编码清单
+    expect(text).toContain('foo-bar-9|88|2026-03-01T12:00:00Z')
+
+    // 4. 验证 N1 修复：AI Credits 位于滚动容器外层，即便模型众多也不会被关入滚动容器内
+    const scrollContainer = wrapper.find('.max-h-36')
+    expect(scrollContainer.exists()).toBe(true)
+    expect(scrollContainer.findAll('.usage-bar').length).toBe(3)
   })
 
   it('Antigravity 会显示 AI Credits 余额信息', async () => {

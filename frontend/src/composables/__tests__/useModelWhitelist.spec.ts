@@ -45,6 +45,29 @@ describe('useModelWhitelist', () => {
     expect(models).toContain('gemini-3-pro-image')
   })
 
+  it('antigravity 模型列表包含实测可用的 Gemini tiered 模型且不包含已撤下的虚假型号', () => {
+    const models = getModelsByPlatform('antigravity')
+
+    // 包含后端注册的真实可用模型
+    expect(models).toContain('gemini-3.6-flash-high')
+    expect(models).toContain('gemini-3.6-flash-low')
+    expect(models).toContain('gemini-3.6-flash-medium')
+    expect(models).toContain('gemini-3.6-flash-tiered')
+    expect(models).toContain('gemini-3.7-flash-tiered')
+    expect(models).toContain('gemini-3.8-flash-tiered')
+
+    // 不包含上游返回 NOT_FOUND 的 9 个已撤下型号
+    expect(models).not.toContain('gemini-3.6-flash')
+    expect(models).not.toContain('gemini-3.7-flash')
+    expect(models).not.toContain('gemini-3.7-flash-high')
+    expect(models).not.toContain('gemini-3.7-flash-low')
+    expect(models).not.toContain('gemini-3.7-flash-medium')
+    expect(models).not.toContain('gemini-3.8-flash')
+    expect(models).not.toContain('gemini-3.8-flash-high')
+    expect(models).not.toContain('gemini-3.8-flash-low')
+    expect(models).not.toContain('gemini-3.8-flash-medium')
+  })
+
   it('Claude 模型列表包含新发布的 Claude 模型', () => {
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5-1')
     expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5-1')
