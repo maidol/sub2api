@@ -3,7 +3,9 @@ package admin
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -118,6 +120,68 @@ func setupAccountListRouter() (*gin.Engine, *stubAdminService) {
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router.GET("/api/v1/admin/accounts", handler.List)
 	return router, adminSvc
+}
+
+type accountListUpstreamErrorCounter struct {
+	counts map[int64]service.UpstreamErrorCounts
+	err    error
+}
+
+func (c *accountListUpstreamErrorCounter) RecordUpstreamError(context.Context, service.OpsUpstreamErrorEvent) error {
+	return nil
+}
+
+func (c *accountListUpstreamErrorCounter) GetAccountUpstreamErrorCounts(context.Context, []int64) (map[int64]service.UpstreamErrorCounts, error) {
+	return c.counts, c.err
+}
+
+func setupAccountListRouterWithCounter(counter service.UpstreamErrorCounter) (*gin.Engine, *stubAdminService) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	adminSvc := newStubAdminService()
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, counter)
+	router.GET("/api/v1/admin/accounts", handler.List)
+	return router, adminSvc
+}
+
+func TestAccountHandlerListFullAndLiteIncludeUpstreamErrorCounts(t *testing.T) {
+	counter := &accountListUpstreamErrorCounter{counts: map[int64]service.UpstreamErrorCounts{
+		3: {Client: 2, Server: 1},
+	}}
+	router, adminSvc := setupAccountListRouterWithCounter(counter)
+	adminSvc.accounts = []service.Account{{
+		ID: 3, Name: "counted-account", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeAPIKey, Status: service.StatusActive,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}}
+
+	for _, query := range []string{"", "&lite=1"} {
+		t.Run(map[string]string{"": "full", "&lite=1": "lite"}[query], func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20"+query, nil)
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code)
+			var payload struct {
+				Data struct {
+					Items []map[string]any `json:"items"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+			require.Len(t, payload.Data.Items, 1)
+			require.Equal(t, map[string]any{"client": float64(2), "server": float64(1)}, payload.Data.Items[0]["upstream_error_count"])
+		})
+	}
+}
+
+func TestAccountHandlerListUpstreamErrorCacheFailureKeepsSuccessfulResponse(t *testing.T) {
+	counter := &accountListUpstreamErrorCounter{err: errors.New("redis unavailable")}
+	router, _ := setupAccountListRouterWithCounter(counter)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotContains(t, rec.Body.String(), "upstream_error_count")
 }
 
 func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {

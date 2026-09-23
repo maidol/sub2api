@@ -237,14 +237,72 @@ func (s *AntigravityGatewayService) handleAntigravityModelRateLimitBeforePolicy(
 	if p.account == nil || p.account.Platform != PlatformAntigravity {
 		return false
 	}
-	_, shouldRateLimitModel, waitDuration, modelName, isModelCapacityExhausted := shouldTriggerAntigravitySmartRetry(p.account, respBody)
-	if isModelCapacityExhausted || !shouldRateLimitModel || strings.TrimSpace(modelName) == "" {
+	info := parseAntigravitySmartRetryInfo(respBody)
+	if info == nil {
+		if statusCode != http.StatusTooManyRequests {
+			return false
+		}
+		if antigravityResponseIsStructuredError(respBody) && !antigravityResponseIsSparseResourceExhausted(respBody) {
+			return false
+		}
+		modelName := resolveFinalAntigravityModelKey(p.ctx, p.account, p.requestedModel)
+		if strings.TrimSpace(modelName) == "" {
+			return false
+		}
+		return s.setAntigravityModelRateLimitBeforePolicy(p, statusCode, modelName, antigravityDefaultRateLimitDuration)
+	}
+	if info.IsModelCapacityExhausted {
+		return false
+	}
+	_, shouldRateLimitModel, waitDuration, modelName, _ := shouldTriggerAntigravitySmartRetry(p.account, respBody)
+	if !shouldRateLimitModel || strings.TrimSpace(modelName) == "" {
 		return false
 	}
 	rateLimitDuration := waitDuration
 	if rateLimitDuration <= 0 {
 		rateLimitDuration = antigravityDefaultRateLimitDuration
 	}
+	return s.setAntigravityModelRateLimitBeforePolicy(p, statusCode, modelName, rateLimitDuration)
+}
+
+func antigravityResponseIsStructuredError(body []byte) bool {
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false
+	}
+	errorValue, ok := parsed["error"]
+	if !ok || string(errorValue) == "null" {
+		return false
+	}
+	var errorObject map[string]json.RawMessage
+	return json.Unmarshal(errorValue, &errorObject) == nil && errorObject != nil
+}
+
+// antigravityResponseIsSparseResourceExhausted 判断是否为缺少 details 的 Google 结构化 429 RESOURCE_EXHAUSTED 错误。
+// 例如: {"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}
+// 若 details 为空（缺少、null 或 []），且 status 为 RESOURCE_EXHAUSTED，则属于少字段结构化 429。
+//
+// 注：在错误分类体系中，isURLLevelRateLimit（在 antigravityRetryLoop 中被 handleSmartRetry 调用）
+// 同样包含 "Resource has been exhausted" 的字符串匹配，在 OAuth 重试链路中被视作可尝试切换 URL 的候选；
+// 而在此处，针对配置了自定义错误码策略的场景（主要是 APIKey 模式，见 account.IsCustomErrorCodesEnabled），
+// 则作为模型级配额兜底写入限流，防止漏判后被降级为通用 500。
+func antigravityResponseIsSparseResourceExhausted(body []byte) bool {
+	var parsed struct {
+		Error struct {
+			Status  string            `json:"status"`
+			Details []json.RawMessage `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false
+	}
+	if parsed.Error.Status != googleRPCStatusResourceExhausted {
+		return false
+	}
+	return len(parsed.Error.Details) == 0
+}
+
+func (s *AntigravityGatewayService) setAntigravityModelRateLimitBeforePolicy(p antigravityRetryLoopParams, statusCode int, modelName string, rateLimitDuration time.Duration) bool {
 	resetAt := time.Now().Add(rateLimitDuration)
 	if !s.setAntigravityModelRateLimits(p.ctx, p.accountRepo, p.account, modelName, p.prefix, statusCode, resetAt, false) {
 		return false

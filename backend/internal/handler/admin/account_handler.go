@@ -62,10 +62,12 @@ type AccountHandler struct {
 	sessionLimitCache       service.SessionLimitCache
 	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
+	upstreamErrorCounter    service.UpstreamErrorCounter
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	cfg                     *config.Config
+	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -75,6 +77,10 @@ func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamB
 
 func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUsageService) {
 	h.ollamaCloudUsage = usage
+}
+
+func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
+	h.opencodeGoUsage = usage
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -93,7 +99,12 @@ func NewAccountHandler(
 	sessionLimitCache service.SessionLimitCache,
 	rpmCache service.RPMCache,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
+	upstreamErrorCounter ...service.UpstreamErrorCounter,
 ) *AccountHandler {
+	var errorCounter service.UpstreamErrorCounter
+	if len(upstreamErrorCounter) > 0 {
+		errorCounter = upstreamErrorCounter[0]
+	}
 	return &AccountHandler{
 		adminService:            adminService,
 		oauthService:            oauthService,
@@ -109,6 +120,7 @@ func NewAccountHandler(
 		sessionLimitCache:       sessionLimitCache,
 		rpmCache:                rpmCache,
 		tokenCacheInvalidator:   tokenCacheInvalidator,
+		upstreamErrorCounter:    errorCounter,
 	}
 }
 
@@ -192,14 +204,16 @@ type CheckMixedChannelRequest struct {
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
 	*dto.Account
-	simpleMode         bool                         `json:"-"`
-	CurrentConcurrency int                          `json:"current_concurrency"`
-	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
-	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
+	simpleMode         bool                             `json:"-"`
+	CurrentConcurrency int                              `json:"current_concurrency"`
+	SchedulerScore     *AccountSchedulerScore           `json:"scheduler_score,omitempty"`
+	SchedulerScores    []AccountSchedulerGroupScore     `json:"scheduler_scores,omitempty"`
+	Gemini38Scheduler  *service.Gemini38SchedulerStatus `json:"gemini_38_scheduler,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
-	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
-	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
-	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`  // 当前窗口费用
+	ActiveSessions     *int                         `json:"active_sessions,omitempty"`      // 当前活跃会话数
+	CurrentRPM         *int                         `json:"current_rpm,omitempty"`          // 当前分钟 RPM 计数
+	UpstreamErrorCount *service.UpstreamErrorCounts `json:"upstream_error_count,omitempty"` // 最近五分钟上游 4xx/5xx
 }
 
 // AccountListItemWithConcurrency is the compact account-list envelope used
@@ -207,12 +221,14 @@ type AccountWithConcurrency struct {
 // so groups/account_groups never appear in the list payload.
 type AccountListItemWithConcurrency struct {
 	*dto.AccountListItem
-	CurrentConcurrency int                          `json:"current_concurrency"`
-	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
-	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
-	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
-	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
-	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
+	CurrentConcurrency int                              `json:"current_concurrency"`
+	SchedulerScore     *AccountSchedulerScore           `json:"scheduler_score,omitempty"`
+	SchedulerScores    []AccountSchedulerGroupScore     `json:"scheduler_scores,omitempty"`
+	Gemini38Scheduler  *service.Gemini38SchedulerStatus `json:"gemini_38_scheduler,omitempty"`
+	CurrentWindowCost  *float64                         `json:"current_window_cost,omitempty"`
+	ActiveSessions     *int                             `json:"active_sessions,omitempty"`
+	CurrentRPM         *int                             `json:"current_rpm,omitempty"`
+	UpstreamErrorCount *service.UpstreamErrorCounts     `json:"upstream_error_count,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -343,6 +359,14 @@ func (h *AccountHandler) accountResponseFromService(account *service.Account) *d
 	return out
 }
 
+func gemini38SchedulerStatus(account *service.Account) *service.Gemini38SchedulerStatus {
+	if account == nil || account.Platform != service.PlatformAntigravity {
+		return nil
+	}
+	status := account.EvaluateGemini38SchedulerStatus(context.Background())
+	return &status
+}
+
 func (h *AccountHandler) accountListResponseFromService(account *service.Account) *dto.Account {
 	out := dto.AccountFromServiceShallow(account)
 	if out != nil && account != nil {
@@ -363,6 +387,7 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		Account:            h.accountResponseFromService(account),
 		simpleMode:         h.isSimpleMode(),
 		CurrentConcurrency: 0,
+		Gemini38Scheduler:  gemini38SchedulerStatus(account),
 	}
 	if account == nil {
 		return item
@@ -674,14 +699,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if h.ollamaCloudUsage != nil && len(accounts) > 0 {
+	if len(accounts) > 0 {
 		accountPointers := make([]*service.Account, len(accounts))
 		for index := range accounts {
 			accountPointers[index] = &accounts[index]
 		}
-		if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), accountPointers); err != nil {
-			response.ErrorFrom(c, err)
-			return
+		if h.ollamaCloudUsage != nil {
+			if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), accountPointers); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
+		if h.opencodeGoUsage != nil {
+			if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), accountPointers); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
 		}
 	}
 
@@ -692,6 +725,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	concurrencyCounts := make(map[int64]int)
+	upstreamErrorCounts := make(map[int64]service.UpstreamErrorCounts)
 	var windowCosts map[int64]float64
 	var activeSessions map[int64]int
 	var rpmCounts map[int64]int
@@ -714,6 +748,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 	if h.concurrencyService != nil {
 		if cc, ccErr := h.concurrencyService.GetAccountConcurrencyBatch(c.Request.Context(), accountIDs); ccErr == nil && cc != nil {
 			concurrencyCounts = cc
+		}
+	}
+	if h.upstreamErrorCounter != nil {
+		if counts, countErr := h.upstreamErrorCounter.GetAccountUpstreamErrorCounts(c.Request.Context(), accountIDs); countErr == nil && counts != nil {
+			upstreamErrorCounts = counts
 		}
 	}
 
@@ -799,6 +838,10 @@ func (h *AccountHandler) List(c *gin.Context) {
 			CurrentConcurrency: concurrencyCounts[acc.ID],
 			SchedulerScore:     schedulerScores[acc.ID],
 			SchedulerScores:    schedulerGroupScores[acc.ID],
+			Gemini38Scheduler:  gemini38SchedulerStatus(acc),
+		}
+		if counts, ok := upstreamErrorCounts[acc.ID]; ok {
+			item.UpstreamErrorCount = &counts
 		}
 
 		// 添加窗口费用（仅当启用时）
@@ -836,9 +879,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 				CurrentConcurrency: item.CurrentConcurrency,
 				SchedulerScore:     item.SchedulerScore,
 				SchedulerScores:    item.SchedulerScores,
+				Gemini38Scheduler:  item.Gemini38Scheduler,
 				CurrentWindowCost:  item.CurrentWindowCost,
 				ActiveSessions:     item.ActiveSessions,
 				CurrentRPM:         item.CurrentRPM,
+				UpstreamErrorCount: item.UpstreamErrorCount,
 			}
 		}
 		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)
@@ -938,6 +983,12 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 	}
 	if h.ollamaCloudUsage != nil {
 		if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+	if h.opencodeGoUsage != nil {
+		if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
 			response.ErrorFrom(c, err)
 			return
 		}
