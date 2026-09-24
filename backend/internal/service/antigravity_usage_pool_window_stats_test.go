@@ -71,6 +71,25 @@ func TestWithAntigravityPoolWindowStats(t *testing.T) {
 	require.Len(t, repo.calls, 3)
 }
 
+func TestWithAntigravityPoolWindowStatsIdleWindowUsesRollingStart(t *testing.T) {
+	repo := &agPoolStatsRepoStub{}
+	svc := &AccountUsageService{usageLogRepo: repo, cache: NewUsageCache()}
+
+	fetchedReset := time.Now().Add(5*time.Hour - 2*time.Minute)
+	usage := &UsageInfo{AntigravityPools: []AntigravityPoolUsage{{
+		Pool:     antigravityPoolGemini,
+		FiveHour: &UsageProgress{ResetsAt: &fetchedReset, WindowIdle: true},
+	}}}
+
+	before := time.Now()
+	got := svc.withAntigravityPoolWindowStats(context.Background(), &Account{ID: 9}, usage)
+	require.NotNil(t, got.AntigravityPools[0].FiveHour.WindowStats)
+	require.True(t, got.AntigravityPools[0].FiveHour.WindowIdle)
+	require.Len(t, repo.calls, 1)
+	// 起点是 now-5h，而不是 resetsAt-5h（≈ 两分钟前）
+	require.WithinDuration(t, before.Add(-5*time.Hour), repo.calls[0].start, time.Second)
+}
+
 func TestWithAntigravityPoolWindowStatsWithoutReader(t *testing.T) {
 	svc := &AccountUsageService{usageLogRepo: &usageBatchLogRepoStub{}, cache: NewUsageCache()}
 	usage := &UsageInfo{AntigravityPools: []AntigravityPoolUsage{{Pool: antigravityPoolGemini, FiveHour: &UsageProgress{}}}}
@@ -82,12 +101,16 @@ func TestAntigravityWindowStart(t *testing.T) {
 	length := 5 * time.Hour
 
 	reset := now.Add(2 * time.Hour)
-	require.Equal(t, now.Add(-3*time.Hour), antigravityWindowStart(&reset, length, now))
+	require.Equal(t, now.Add(-3*time.Hour), antigravityWindowStart(&reset, false, length, now))
 
 	// 没有 / 已过期 / 超出一个窗口长度的重置时间：回落为滚动窗口
-	require.Equal(t, now.Add(-length), antigravityWindowStart(nil, length, now))
+	require.Equal(t, now.Add(-length), antigravityWindowStart(nil, false, length, now))
 	past := now.Add(-time.Minute)
-	require.Equal(t, now.Add(-length), antigravityWindowStart(&past, length, now))
+	require.Equal(t, now.Add(-length), antigravityWindowStart(&past, false, length, now))
 	far := now.Add(6 * time.Hour)
-	require.Equal(t, now.Add(-length), antigravityWindowStart(&far, length, now))
+	require.Equal(t, now.Add(-length), antigravityWindowStart(&far, false, length, now))
+
+	// idle 窗口的 resetTime 是「取数时刻 + length」，反推会让起点贴着现在；按滚动窗口统计
+	idleReset := now.Add(length - 2*time.Minute)
+	require.Equal(t, now.Add(-length), antigravityWindowStart(&idleReset, true, length, now))
 }

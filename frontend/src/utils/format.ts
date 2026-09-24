@@ -385,6 +385,23 @@ export function formatCompactNumber(
 }
 
 /**
+ * 把一段正的时长格式化为紧凑的 `3d 6h` / `4h 58m` / `12m`（不走 i18n，用量窗口列统一用它）。
+ * 调用方负责处理 diffMs <= 0 的情况。
+ */
+export function formatShortDuration(diffMs: number): string {
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+
+  if (diffHours >= 24) {
+    return `${Math.floor(diffHours / 24)}d ${diffHours % 24}h`
+  }
+  if (diffHours > 0) {
+    return `${diffHours}h ${diffMins}m`
+  }
+  return `${diffMins}m`
+}
+
+/**
  * 格式化倒计时（从现在到目标时间的剩余时间）
  * @param targetDate 目标日期字符串或 Date 对象
  * @returns 倒计时字符串，如 "2h 41m", "3d 5h", "15m"

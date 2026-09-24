@@ -1690,7 +1690,15 @@ export default {
         gemini: 'Gemini',
         claudeGpt: 'Claude/GPT',
         weekly: '7d',
-        fiveHour: '5h'
+        fiveHour: '5h',
+        used: 'used {value}',
+        remaining: 'left {value}',
+        idle: 'not started',
+        idleHint: 'Window not started: nothing consumed yet; upstream starts the timer on first use',
+        upstreamRemaining: 'Upstream remaining {value}',
+        local: 'Local',
+        localHint:
+          'Local stats: requests forwarded by this gateway whose upstream model belongs to this pool. Running windows count from the upstream window start; not-started windows count the last 5h / 7d. Usage made directly in the IDE is not included'
       },
       ineligibleWarning:
         'This account is not eligible for Antigravity, but API forwarding still works. Use at your own risk.',

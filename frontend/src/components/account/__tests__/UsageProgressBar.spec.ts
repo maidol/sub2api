@@ -22,25 +22,6 @@ describe('UsageProgressBar', () => {
     vi.useRealTimers()
   })
 
-  it('showSubPercent 时 0 < 利用率 < 1 显示 <1%，否则仍四舍五入', () => {
-    const sub = mount(UsageProgressBar, {
-      props: { label: '5h', utilization: 0.3, color: 'indigo', showSubPercent: true }
-    })
-    expect(sub.text()).toContain('<1%')
-
-    const zero = mount(UsageProgressBar, {
-      props: { label: '5h', utilization: 0, color: 'indigo', showSubPercent: true }
-    })
-    expect(zero.text()).toContain('0%')
-    expect(zero.text()).not.toContain('<1%')
-
-    const legacy = mount(UsageProgressBar, {
-      props: { label: '5h', utilization: 0.3, color: 'indigo' }
-    })
-    expect(legacy.text()).toContain('0%')
-    expect(legacy.text()).not.toContain('<1%')
-  })
-
   it('showNowWhenIdle=true 且利用率为 0 时显示“现在”', () => {
     const wrapper = mount(UsageProgressBar, {
       props: {

@@ -608,7 +608,15 @@ export default {
         gemini: 'Gemini',
         claudeGpt: 'Claude/GPT',
         weekly: '周',
-        fiveHour: '5h'
+        fiveHour: '5h',
+        used: '已用 {value}',
+        remaining: '剩 {value}',
+        idle: '未开始',
+        idleHint: '窗口未开始：本窗口没有任何消耗，上游在首次使用时才开始计时',
+        upstreamRemaining: '上游剩余 {value}',
+        local: '本地',
+        localHint:
+          '本地统计：经本网关转发、上游模型属于该池的请求。有倒计时的窗口按上游窗口起点统计，未开始的窗口按最近 5h / 7 天统计；在 IDE 里直接使用的额度不在其中'
       },
       ineligibleWarning:
         '该账号无 Antigravity 使用权限，但仍能进行 API 转发。继续使用请自行承担风险。',

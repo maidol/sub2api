@@ -168,6 +168,11 @@ func buildAntigravityPoolsFromSummary(summary *antigravity.RetrieveUserQuotaSumm
 			}
 			// 这里不经过 int 截断：summary 给的是 float64，保留它。
 			progress := antigravityProgress((1.0-fraction)*100, bucket.ResetTime)
+			progress.RemainingFraction = &fraction
+			// 剩余满额 = 本窗口没有任何消耗。上游此时把 resetTime 填成「现在 + 窗口长度」，
+			// 窗口要到第一次使用才开始计时，这个倒计时不是真的。
+			progress.WindowIdle = fraction >= 1
+			progress.UpstreamNote = strings.TrimSpace(bucket.Description)
 			switch window {
 			case antigravityWindowFiveHour:
 				entry.FiveHour = progress
@@ -301,7 +306,7 @@ func (s *AccountUsageService) antigravityPoolWindowWithStats(
 		return progress
 	}
 
-	start := antigravityWindowStart(progress.ResetsAt, length, now)
+	start := antigravityWindowStart(progress.ResetsAt, progress.WindowIdle, length, now)
 	// 键里带窗口起点：窗口一滚动就自然换键，旧统计不会被带进新窗口。
 	key := fmt.Sprintf("%d:%s:%s:%d", accountID, pool, window, start.Unix())
 
@@ -328,9 +333,13 @@ func (s *AccountUsageService) antigravityPoolWindowWithStats(
 }
 
 // antigravityWindowStart 由上游的重置时间反推窗口起点（resetsAt - length）。
-// 没有重置时间、已过期或离现在超过一个窗口长度（语义不明）时，按滚动窗口 now - length 算。
-func antigravityWindowStart(resetsAt *time.Time, length time.Duration, now time.Time) time.Time {
-	if resetsAt != nil && resetsAt.After(now) && resetsAt.Sub(now) <= length {
+//
+// 上游窗口未开始（idle）时 resetsAt 只是「取数时刻 + length」，反推出的起点约等于取数时刻，
+// 本地统计会只剩几分钟——那样「本地有请求、上游却说没用」的矛盾就看不见了。
+// 所以 idle 窗口、没有重置时间、已过期或离现在超过一个窗口长度（语义不明）时，
+// 一律按滚动窗口 now - length 统计。
+func antigravityWindowStart(resetsAt *time.Time, idle bool, length time.Duration, now time.Time) time.Time {
+	if !idle && resetsAt != nil && resetsAt.After(now) && resetsAt.Sub(now) <= length {
 		return resetsAt.Add(-length)
 	}
 	return now.Add(-length)

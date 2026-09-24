@@ -164,6 +164,14 @@ type UsageProgress struct {
 	// QuotaWindowAbsent indicates that the upstream has no quota window;
 	// WindowStats may still contain local traffic for that period.
 	QuotaWindowAbsent bool `json:"quota_window_absent,omitempty"`
+	// RemainingFraction is the upstream remaining ratio (0-1) as reported,
+	// before conversion to Utilization. Set by Antigravity quota summary only.
+	RemainingFraction *float64 `json:"remaining_fraction,omitempty"`
+	// WindowIdle means the upstream window has not started (nothing consumed);
+	// its ResetsAt is then just "now + window length" and is not a real countdown.
+	WindowIdle bool `json:"window_idle,omitempty"`
+	// UpstreamNote is the upstream's own human-readable text for this window.
+	UpstreamNote string `json:"upstream_note,omitempty"`
 }
 
 // AntigravityModelQuota Antigravity 单个模型的配额信息

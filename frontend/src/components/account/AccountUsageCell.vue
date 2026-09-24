@@ -318,18 +318,8 @@
 
       <!-- Usage data from API：优先家族池，池不可用时回落到逐模型清单 -->
       <div v-else-if="hasAntigravityPools" class="space-y-1">
-        <div class="space-y-1" data-test="antigravity-pools" :title="antigravityPoolSourceTitle">
-          <UsageProgressBar
-            v-for="row in antigravityPoolRows"
-            :key="row.key"
-            :label="row.label"
-            :utilization="row.utilization"
-            :resets-at="row.resetsAt"
-            :color="row.color"
-            :window-stats="row.windowStats"
-            show-sub-percent
-            label-width="auto"
-          />
+        <div data-test="antigravity-pools" :title="antigravityPoolSourceTitle">
+          <AntigravityPoolUsage :pools="antigravityPools" />
         </div>
 
         <div v-if="aiCreditsDisplay" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
@@ -701,6 +691,7 @@ import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
+import AntigravityPoolUsage from './AntigravityPoolUsage.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
@@ -971,49 +962,6 @@ const antigravityPoolSourceTitle = computed(() => {
     return 'Inferred: per-model quota'
   }
   return undefined
-})
-
-const antigravityPoolRows = computed(() => {
-  const rows: Array<{
-    key: string
-    label: string
-    utilization: number
-    resetsAt: string | null
-    windowStats: WindowStats | null
-    color: 'indigo' | 'amber'
-  }> = []
-
-  for (const pool of antigravityPools.value) {
-    const isGemini = pool.pool === 'gemini'
-    const poolLabel = isGemini
-      ? t('admin.accounts.antigravityPool.gemini')
-      : t('admin.accounts.antigravityPool.claudeGpt')
-    const color = isGemini ? 'indigo' : 'amber'
-
-    // 周在前、5h 在后，与 Antigravity 客户端设置页的行序一致。
-    // weekly 为 null/undefined 时整行不 push——不要 push 一个 utilization: 0 的行。
-    if (pool.weekly) {
-      rows.push({
-        key: `${pool.pool}-weekly`,
-        label: `${poolLabel} ${t('admin.accounts.antigravityPool.weekly')}`,
-        utilization: pool.weekly.utilization,
-        resetsAt: pool.weekly.resets_at ?? null,
-        windowStats: pool.weekly.window_stats ?? null,
-        color
-      })
-    }
-    if (pool.five_hour) {
-      rows.push({
-        key: `${pool.pool}-5h`,
-        label: `${poolLabel} ${t('admin.accounts.antigravityPool.fiveHour')}`,
-        utilization: pool.five_hour.utilization,
-        resetsAt: pool.five_hour.resets_at ?? null,
-        windowStats: pool.five_hour.window_stats ?? null,
-        color
-      })
-    }
-  }
-  return rows
 })
 
 const aiCreditsDisplay = computed(() => {

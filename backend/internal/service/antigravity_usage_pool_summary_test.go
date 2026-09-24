@@ -35,6 +35,18 @@ func TestBuildAntigravityPoolsFromSummary_RealFixture(t *testing.T) {
 	require.NotNil(t, pools[1].Weekly)
 	require.InDelta(t, (1.0-1.0)*100, pools[1].FiveHour.Utilization, 0.0001)
 	require.InDelta(t, (1.0-0.41361254)*100, pools[1].Weekly.Utilization, 0.0001)
+
+	// 上游原值、说明文字一并带出
+	require.NotNil(t, pools[0].Weekly.RemainingFraction)
+	require.InDelta(t, 0.662049, *pools[0].Weekly.RemainingFraction, 1e-9)
+	require.Equal(t, "You have used some of your weekly limit, it will fully refresh in 1 day, 23 hours.", pools[0].Weekly.UpstreamNote)
+	require.False(t, pools[0].Weekly.WindowIdle)
+	require.False(t, pools[0].FiveHour.WindowIdle)
+
+	// 3p-5h 剩余满额：窗口未开始，resetTime 不是真的倒计时
+	require.True(t, pools[1].FiveHour.WindowIdle)
+	require.Empty(t, pools[1].FiveHour.UpstreamNote)
+	require.False(t, pools[1].Weekly.WindowIdle)
 }
 
 // 2. 反向：桶里没有 remainingFraction 键 → 那个窗口是 nil，不是 0

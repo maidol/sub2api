@@ -66,7 +66,7 @@ import { computed, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
-import { formatCompactNumber } from '@/utils/format'
+import { formatCompactNumber, formatShortDuration } from '@/utils/format'
 
 const props = withDefaults(
   defineProps<{
@@ -82,8 +82,6 @@ const props = withDefaults(
     remainingCapacity?: boolean
     /** fixed: 定宽居中徽章（账号页纵向对齐）；auto: 限宽截断左对齐（监控页组合标签） */
     labelWidth?: 'fixed' | 'auto'
-    /** 0 < 使用率 < 1 时显示「<1%」而不是被四舍五入成「0%」（大额度窗口用） */
-    showSubPercent?: boolean
   }>(),
   { labelWidth: 'fixed' }
 )
@@ -177,9 +175,6 @@ const barWidth = computed(() => {
 
 // Display percentage (cap at 999% for readability)
 const displayPercent = computed(() => {
-  if (props.showSubPercent && !props.remainingCapacity && props.utilization > 0 && props.utilization < 1) {
-    return '<1%'
-  }
   const percent = Math.round(
     props.remainingCapacity
       ? Math.min(Math.max(props.utilization, 0), 100)
@@ -211,17 +206,7 @@ const formatResetTime = computed(() => {
     return props.utilization > 0 ? t('usage.resetPending') : t('usage.resetNow')
   }
 
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-  const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
-
-  if (diffHours >= 24) {
-    const days = Math.floor(diffHours / 24)
-    return `${days}d ${diffHours % 24}h`
-  } else if (diffHours > 0) {
-    return `${diffHours}h ${diffMins}m`
-  } else {
-    return `${diffMins}m`
-  }
+  return formatShortDuration(diffMs)
 })
 
 // Window stats formatters

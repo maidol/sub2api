@@ -1387,6 +1387,12 @@ export interface UsageProgress {
   window_minutes?: number
   /** Upstream has no quota window; only window_stats is meaningful. */
   quota_window_absent?: boolean
+  /** Upstream remaining ratio (0-1) as reported (Antigravity quota summary only). */
+  remaining_fraction?: number | null
+  /** Upstream window not started yet: resets_at is only "now + window", not a real countdown. */
+  window_idle?: boolean
+  /** Upstream's own text for this window. */
+  upstream_note?: string
 }
 
 // Antigravity 单个模型的配额信息
