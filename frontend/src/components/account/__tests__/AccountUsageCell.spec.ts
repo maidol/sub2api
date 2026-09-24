@@ -488,6 +488,52 @@ describe('AccountUsageCell', () => {
     expect(text).toContain('admin.accounts.antigravityPool.claudeGpt admin.accounts.antigravityPool.fiveHour|0|2026-03-09T13:00:00Z')
   })
 
+  it('Antigravity 家族池渲染：每行把本地 window_stats 传给进度条', async () => {
+    getUsage.mockResolvedValue({
+      antigravity_pools: [
+        {
+          pool: 'gemini',
+          weekly: {
+            utilization: 0.3,
+            resets_at: '2026-03-15T10:00:00Z',
+            window_stats: { requests: 12, tokens: 34000, cost: 0.5, standard_cost: 0.5, user_cost: 0.6 }
+          },
+          five_hour: {
+            utilization: 0.1,
+            resets_at: '2026-03-09T12:00:00Z',
+            window_stats: { requests: 3, tokens: 9000, cost: 0.1, standard_cost: 0.1, user_cost: 0.2 }
+          }
+        }
+      ]
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 10032,
+          platform: 'antigravity',
+          type: 'oauth',
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: { label: String, windowStats: Object, showSubPercent: Boolean },
+            template: '<div class="usage-bar">{{ label }}|{{ windowStats?.requests }}|{{ showSubPercent }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const text = wrapper.find('[data-test="antigravity-pools"]').text()
+    expect(text).toContain('admin.accounts.antigravityPool.gemini admin.accounts.antigravityPool.weekly|12|true')
+    expect(text).toContain('admin.accounts.antigravityPool.gemini admin.accounts.antigravityPool.fiveHour|3|true')
+  })
+
   it('Antigravity 家族池渲染：显示 pool_source title 提示', async () => {
     getUsage.mockResolvedValue({
       antigravity_pool_source: 'quota_summary',

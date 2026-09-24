@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -43,6 +45,18 @@ func antigravityPoolFor(modelKey string) string {
 		return antigravityPoolClaudeGPT
 	}
 	return ""
+}
+
+// antigravityPoolModelPrefixes 是 antigravityPoolFor 的反向：统计本地用量时，
+// 上游模型以这些前缀开头的请求计入该池。两处必须保持同一套前缀。
+func antigravityPoolModelPrefixes(pool string) []string {
+	switch pool {
+	case antigravityPoolGemini:
+		return []string{"gemini"}
+	case antigravityPoolClaudeGPT:
+		return []string{"claude", "gpt"}
+	}
+	return nil
 }
 
 // buildAntigravityPools 只在同池内每个模型的 (utilization, resetTime) 完全一致时
@@ -240,4 +254,84 @@ func logAntigravityPoolDivergence(inferred, authoritative []AntigravityPoolUsage
 				"per_model_inferred", b.Utilization)
 		}
 	}
+}
+
+// withAntigravityPoolWindowStats 给每个家族池的 5h/周窗口挂上本地用量统计
+// （经本网关转发、落在该窗口内、上游模型属于该池的请求）。
+//
+// 上游只给百分比，大额度账号用掉一点会被四舍五入成 0%；本地统计让「用了多少」可见。
+// 只统计经过本网关的流量——同账号在 IDE 里直接消耗的额度不在其中。
+//
+// usage 可能是缓存里共享的对象，这里返回浅拷贝，不原地改池。
+// 上游没下发的窗口（nil）保持 nil，不为了挂统计造出一行。
+func (s *AccountUsageService) withAntigravityPoolWindowStats(ctx context.Context, account *Account, usage *UsageInfo) *UsageInfo {
+	if usage == nil || account == nil || len(usage.AntigravityPools) == 0 {
+		return usage
+	}
+	reader, ok := s.usageLogRepo.(accountModelFamilyWindowStatsReader)
+	if !ok {
+		return usage
+	}
+
+	now := time.Now()
+	out := *usage
+	out.AntigravityPools = make([]AntigravityPoolUsage, len(usage.AntigravityPools))
+	for i, pool := range usage.AntigravityPools {
+		pool.FiveHour = s.antigravityPoolWindowWithStats(ctx, reader, account.ID, pool.Pool, antigravityWindowFiveHour, 5*time.Hour, pool.FiveHour, now)
+		pool.Weekly = s.antigravityPoolWindowWithStats(ctx, reader, account.ID, pool.Pool, antigravityWindowWeekly, 7*24*time.Hour, pool.Weekly, now)
+		out.AntigravityPools[i] = pool
+	}
+	return &out
+}
+
+func (s *AccountUsageService) antigravityPoolWindowWithStats(
+	ctx context.Context,
+	reader accountModelFamilyWindowStatsReader,
+	accountID int64,
+	pool, window string,
+	length time.Duration,
+	progress *UsageProgress,
+	now time.Time,
+) *UsageProgress {
+	if progress == nil {
+		return nil
+	}
+	prefixes := antigravityPoolModelPrefixes(pool)
+	if len(prefixes) == 0 {
+		return progress
+	}
+
+	start := antigravityWindowStart(progress.ResetsAt, length, now)
+	// 键里带窗口起点：窗口一滚动就自然换键，旧统计不会被带进新窗口。
+	key := fmt.Sprintf("%d:%s:%s:%d", accountID, pool, window, start.Unix())
+
+	var stats *WindowStats
+	if cached, ok := s.cache.agPoolStatsCache.Load(key); ok {
+		if c, ok := cached.(*windowStatsCache); ok && time.Since(c.timestamp) < windowStatsCacheTTL {
+			stats = c.stats
+		}
+	}
+	if stats == nil {
+		raw, err := reader.GetAccountModelFamilyWindowStats(ctx, accountID, start, now, prefixes)
+		if err != nil {
+			slog.Warn("failed to get antigravity pool window stats",
+				"account_id", accountID, "pool", pool, "window", window, "error", err)
+			return progress
+		}
+		stats = windowStatsFromAccountStats(raw)
+		s.cache.agPoolStatsCache.Store(key, &windowStatsCache{stats: stats, timestamp: time.Now()})
+	}
+
+	cp := *progress
+	cp.WindowStats = stats
+	return &cp
+}
+
+// antigravityWindowStart 由上游的重置时间反推窗口起点（resetsAt - length）。
+// 没有重置时间、已过期或离现在超过一个窗口长度（语义不明）时，按滚动窗口 now - length 算。
+func antigravityWindowStart(resetsAt *time.Time, length time.Duration, now time.Time) time.Time {
+	if resetsAt != nil && resetsAt.After(now) && resetsAt.Sub(now) <= length {
+		return resetsAt.Add(-length)
+	}
+	return now.Add(-length)
 }

@@ -326,6 +326,8 @@
             :utilization="row.utilization"
             :resets-at="row.resetsAt"
             :color="row.color"
+            :window-stats="row.windowStats"
+            show-sub-percent
             label-width="auto"
           />
         </div>
@@ -977,6 +979,7 @@ const antigravityPoolRows = computed(() => {
     label: string
     utilization: number
     resetsAt: string | null
+    windowStats: WindowStats | null
     color: 'indigo' | 'amber'
   }> = []
 
@@ -995,6 +998,7 @@ const antigravityPoolRows = computed(() => {
         label: `${poolLabel} ${t('admin.accounts.antigravityPool.weekly')}`,
         utilization: pool.weekly.utilization,
         resetsAt: pool.weekly.resets_at ?? null,
+        windowStats: pool.weekly.window_stats ?? null,
         color
       })
     }
@@ -1004,6 +1008,7 @@ const antigravityPoolRows = computed(() => {
         label: `${poolLabel} ${t('admin.accounts.antigravityPool.fiveHour')}`,
         utilization: pool.five_hour.utilization,
         resetsAt: pool.five_hour.resets_at ?? null,
+        windowStats: pool.five_hour.window_stats ?? null,
         color
       })
     }

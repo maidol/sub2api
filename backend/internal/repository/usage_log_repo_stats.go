@@ -334,6 +334,46 @@ func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountI
 	return stats, nil
 }
 
+// GetAccountModelFamilyWindowStats 获取账号在 [startTime, endTime) 内、实际上游模型
+// 以 modelPrefixes 中任一前缀开头（不区分大小写）的请求统计。
+// 上游模型取 upstream_model，未做映射（NULL/空）时回落到 model。
+func (r *usageLogRepository) GetAccountModelFamilyWindowStats(ctx context.Context, accountID int64, startTime, endTime time.Time, modelPrefixes []string) (*usagestats.AccountStats, error) {
+	stats := &usagestats.AccountStats{}
+	if len(modelPrefixes) == 0 {
+		return stats, nil
+	}
+	patterns := make([]string, 0, len(modelPrefixes))
+	for _, prefix := range modelPrefixes {
+		patterns = append(patterns, strings.ToLower(prefix)+"%")
+	}
+
+	query := `
+		SELECT
+			COUNT(*) as requests,
+			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
+			COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as cost,
+			COALESCE(SUM(total_cost), 0) as standard_cost,
+			COALESCE(SUM(actual_cost), 0) as user_cost
+		FROM usage_logs
+		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
+			AND LOWER(COALESCE(NULLIF(upstream_model, ''), model)) LIKE ANY($4)
+	`
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		query,
+		[]any{accountID, startTime, endTime, pq.Array(patterns)},
+		&stats.Requests,
+		&stats.Tokens,
+		&stats.Cost,
+		&stats.StandardCost,
+		&stats.UserCost,
+	); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
 // GetAccountWindowStatsBatch 批量获取同一窗口起点下多个账号的统计数据。
 // 返回 map[accountID]*AccountStats，未命中的账号会返回零值统计，便于上层直接复用。
 func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, accountIDs []int64, startTime time.Time) (map[int64]*usagestats.AccountStats, error) {

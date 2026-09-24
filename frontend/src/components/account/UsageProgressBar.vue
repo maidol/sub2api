@@ -82,6 +82,8 @@ const props = withDefaults(
     remainingCapacity?: boolean
     /** fixed: 定宽居中徽章（账号页纵向对齐）；auto: 限宽截断左对齐（监控页组合标签） */
     labelWidth?: 'fixed' | 'auto'
+    /** 0 < 使用率 < 1 时显示「<1%」而不是被四舍五入成「0%」（大额度窗口用） */
+    showSubPercent?: boolean
   }>(),
   { labelWidth: 'fixed' }
 )
@@ -175,6 +177,9 @@ const barWidth = computed(() => {
 
 // Display percentage (cap at 999% for readability)
 const displayPercent = computed(() => {
+  if (props.showSubPercent && !props.remainingCapacity && props.utilization > 0 && props.utilization < 1) {
+    return '<1%'
+  }
   const percent = Math.round(
     props.remainingCapacity
       ? Math.min(Math.max(props.utilization, 0), 100)

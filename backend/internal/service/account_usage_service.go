@@ -84,6 +84,11 @@ type accountWindowStatsBatchReader interface {
 	GetAccountWindowStatsBatch(ctx context.Context, accountIDs []int64, startTime time.Time) (map[int64]*usagestats.AccountStats, error)
 }
 
+// accountModelFamilyWindowStatsReader 按模型家族统计账号窗口用量（Antigravity 家族池用）。
+type accountModelFamilyWindowStatsReader interface {
+	GetAccountModelFamilyWindowStats(ctx context.Context, accountID int64, startTime, endTime time.Time, modelPrefixes []string) (*usagestats.AccountStats, error)
+}
+
 // apiUsageCache 缓存从 Anthropic API 获取的使用率数据（utilization, resets_at）
 // 同时支持缓存错误响应（负缓存），防止 429 等错误导致的重试风暴
 type apiUsageCache struct {
@@ -119,6 +124,7 @@ const (
 type UsageCache struct {
 	apiCache          sync.Map           // accountID -> *apiUsageCache
 	windowStatsCache  sync.Map           // accountID -> *windowStatsCache
+	agPoolStatsCache  sync.Map           // "accountID:pool:window:start" -> *windowStatsCache
 	antigravityCache  sync.Map           // accountID -> *antigravityUsageCache
 	apiFlight         singleflight.Group // 防止同一账号的并发请求击穿缓存（Anthropic）
 	antigravityFlight singleflight.Group // 防止同一 Antigravity 账号的并发请求击穿缓存
@@ -391,6 +397,7 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 	if account.Platform == PlatformAntigravity {
 		usage, err := s.getAntigravityUsage(ctx, account)
 		if err == nil {
+			usage = s.withAntigravityPoolWindowStats(ctx, account, usage)
 			s.tryClearRecoverableAccountError(ctx, account)
 		}
 		return usage, err
