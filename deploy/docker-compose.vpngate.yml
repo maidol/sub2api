@@ -1,0 +1,42 @@
+# =============================================================================
+# VPN Gate sidecar (optional). Use together with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.vpngate.yml up -d
+# See VPNGATE.md for the pool file and for registering slots as proxies.
+# =============================================================================
+
+services:
+  vpngate:
+    build:
+      context: ..
+      dockerfile: deploy/vpngate/Dockerfile
+    image: sub2api-vpngate:local
+    container_name: sub2api-vpngate
+    restart: unless-stopped
+    # Mihomo's OpenVPN outbound runs in userspace: no TUN device, no
+    # NET_ADMIN, no root.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      - VPNGATE_PROXY_PASSWORD=${VPNGATE_PROXY_PASSWORD:?VPNGATE_PROXY_PASSWORD is required}
+      - VPNGATE_SLOTS=${VPNGATE_SLOTS:-10}
+      - VPNGATE_BASE_PORT=${VPNGATE_BASE_PORT:-20001}
+      - VPNGATE_PROBE_URL=${VPNGATE_PROBE_URL:-https://www.gstatic.com/generate_204}
+      - VPNGATE_PROBE_INTERVAL=${VPNGATE_PROBE_INTERVAL:-60s}
+      - VPNGATE_FAIL_THRESHOLD=${VPNGATE_FAIL_THRESHOLD:-3}
+      - VPNGATE_COOLDOWN=${VPNGATE_COOLDOWN:-30m}
+      - VPNGATE_DNS=${VPNGATE_DNS:-1.1.1.1,8.8.8.8}
+    volumes:
+      - ./vpngate/pool:/data/pool:ro
+      - vpngate_state:/data/state
+    # No ports: published. Only containers on sub2api-network reach the slots.
+    networks:
+      - sub2api-network
+
+volumes:
+  vpngate_state:
+    driver: local
