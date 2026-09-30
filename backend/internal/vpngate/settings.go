@@ -14,10 +14,13 @@ type Settings struct {
 	WorkDir        string
 	MihomoBin      string
 	ControllerAddr string
+	APIListen      string
+	APIToken       string
+	PublicHost     string
 	Slots          int
 	BasePort       int
 	ListenAddr     string
-	ProxyPassword  string
+	MasterSecret   string
 	DNS            []string
 	ProbeURL       string
 	ProbeTimeout   time.Duration
@@ -61,10 +64,13 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 		WorkDir:        str("VPNGATE_WORK_DIR", "/data/state"),
 		MihomoBin:      str("MIHOMO_BIN", "/usr/local/bin/mihomo"),
 		ControllerAddr: str("VPNGATE_CONTROLLER_ADDR", "127.0.0.1:19090"),
+		APIListen:      str("VPNGATE_API_LISTEN", "0.0.0.0:20000"),
+		APIToken:       getenv("VPNGATE_API_TOKEN"),
+		PublicHost:     str("VPNGATE_PUBLIC_HOST", "vpngate"),
 		Slots:          num("VPNGATE_SLOTS", 10, 1, 200),
 		BasePort:       num("VPNGATE_BASE_PORT", 20001, 1024, 65000),
 		ListenAddr:     str("VPNGATE_LISTEN", "0.0.0.0"),
-		ProxyPassword:  getenv("VPNGATE_PROXY_PASSWORD"),
+		MasterSecret:   getenv("VPNGATE_MASTER_SECRET"),
 		ProbeURL:       str("VPNGATE_PROBE_URL", "https://www.gstatic.com/generate_204"),
 		ProbeTimeout:   dur("VPNGATE_PROBE_TIMEOUT", 10*time.Second),
 		ProbeInterval:  dur("VPNGATE_PROBE_INTERVAL", 60*time.Second),
@@ -84,10 +90,14 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 	if len(s.DNS) == 0 {
 		errs = append(errs, "VPNGATE_DNS must list at least one nameserver")
 	}
-	// The password is stored in Sub2API's proxies.password (max 100) and ends
-	// up in proxy URLs; keep it URL-safe.
-	if len(s.ProxyPassword) < 16 || len(s.ProxyPassword) > 100 || strings.ContainsAny(s.ProxyPassword, ":@/?#% ") {
-		errs = append(errs, "VPNGATE_PROXY_PASSWORD is required: 16..100 characters, none of : @ / ? # % or space")
+	if len(s.MasterSecret) < 16 {
+		errs = append(errs, "VPNGATE_MASTER_SECRET is required: at least 16 characters (slot passwords are derived from it, so changing it invalidates every lease's password)")
+	}
+	if len(s.APIToken) < 16 {
+		errs = append(errs, "VPNGATE_API_TOKEN is required: at least 16 characters")
+	}
+	if strings.ContainsAny(s.PublicHost, ":/@ ") {
+		errs = append(errs, "VPNGATE_PUBLIC_HOST must be a bare host name or IP")
 	}
 	if len(errs) > 0 {
 		return Settings{}, fmt.Errorf("invalid settings: %s", strings.Join(errs, "; "))

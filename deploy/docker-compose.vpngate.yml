@@ -1,7 +1,7 @@
 # =============================================================================
 # VPN Gate sidecar (optional). Use together with docker-compose.yml:
 #   docker compose -f docker-compose.yml -f docker-compose.vpngate.yml up -d
-# See VPNGATE.md for the pool file and for registering slots as proxies.
+# See VPNGATE.md for the pool file and for Sub2API's proxy pool mode.
 # =============================================================================
 
 services:
@@ -22,7 +22,8 @@ services:
     tmpfs:
       - /tmp
     environment:
-      - VPNGATE_PROXY_PASSWORD=${VPNGATE_PROXY_PASSWORD:?VPNGATE_PROXY_PASSWORD is required}
+      - VPNGATE_MASTER_SECRET=${VPNGATE_MASTER_SECRET:?VPNGATE_MASTER_SECRET is required}
+      - VPNGATE_API_TOKEN=${VPNGATE_API_TOKEN:?VPNGATE_API_TOKEN is required}
       - VPNGATE_SLOTS=${VPNGATE_SLOTS:-10}
       - VPNGATE_BASE_PORT=${VPNGATE_BASE_PORT:-20001}
       - VPNGATE_PROBE_URL=${VPNGATE_PROBE_URL:-https://www.gstatic.com/generate_204}
@@ -33,7 +34,8 @@ services:
     volumes:
       - ./vpngate/pool:/data/pool:ro
       - vpngate_state:/data/state
-    # No ports: published. Only containers on sub2api-network reach the slots.
+    # No ports: published. Only containers on sub2api-network reach the lease
+    # API (port 20000) and the slots (20001..).
     networks:
       - sub2api-network
 

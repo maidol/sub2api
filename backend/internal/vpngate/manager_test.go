@@ -215,3 +215,56 @@ func TestManagerBoundsProbesPerReselection(t *testing.T) {
 		t.Fatalf("probes = %d (%v), want 6", len(f.delays), f.delays)
 	}
 }
+
+func TestManagerTicksOnlyActiveSlots(t *testing.T) {
+	f := newFake([]string{"A", "B", "C"}, map[string]string{"sub2api-slot01": "A", "sub2api-slot02": "B"})
+	f.down["B"] = true
+	m := NewManager(f, twoSlots, testNodes("A", "B", "C"), ManagerOptions{
+		ProbeURL: "https://probe.example/204", ProbeTimeout: time.Second, FailThreshold: 1,
+		Cooldown: 30 * time.Minute, MaxAttempts: 5, Shuffle: func([]string) {},
+		Active: func() []Slot { return twoSlots[:1] }, // only slot01 is leased
+	})
+	m.Tick(context.Background())
+	if want := []string{"A"}; !reflect.DeepEqual(f.delays, want) {
+		t.Fatalf("probes = %v, want only the leased slot's node %v", f.delays, want)
+	}
+	if len(f.selects) != 0 {
+		t.Fatalf("an unleased slot's dead node must be left alone, selects = %v", f.selects)
+	}
+}
+
+func TestManagerReselectPicksAFreshNodeAndCoolsTheOldOne(t *testing.T) {
+	nodes := []string{"A", "B", "C", "D"}
+	f := newFake(nodes, map[string]string{"sub2api-slot01": "A", "sub2api-slot02": "B"})
+	clock := &testClock{time.Unix(0, 0)}
+	m := NewManager(f, twoSlots, testNodes(nodes...), ManagerOptions{
+		ProbeURL: "https://probe.example/204", ProbeTimeout: time.Second, FailThreshold: 3,
+		Cooldown: 30 * time.Minute, MaxAttempts: 5, Shuffle: func([]string) {}, Now: clock.Now,
+	})
+
+	// slot02 holds B, A is slot01's own node -> C is the first eligible node.
+	node, err := m.Reselect(context.Background(), twoSlots[0])
+	if err != nil || node != "C" {
+		t.Fatalf("Reselect = %q, %v; want C", node, err)
+	}
+	// A is now cooling down: rotating again must not go back to it.
+	node, err = m.Reselect(context.Background(), twoSlots[0])
+	if err != nil || node != "D" {
+		t.Fatalf("second Reselect = %q, %v; want D (A and C cooling, B taken)", node, err)
+	}
+	if want := []string{"sub2api-slot01=C", "sub2api-slot01=D"}; !reflect.DeepEqual(f.selects, want) {
+		t.Fatalf("selects = %v, want %v", f.selects, want)
+	}
+}
+
+func TestManagerReselectReportsNoHealthyNode(t *testing.T) {
+	f := newFake([]string{"A", "B"}, map[string]string{"sub2api-slot01": "A"})
+	f.down["B"] = true
+	m := newTestManager(f, MakeSlots(1, 20001), []string{"A", "B"}, 3, &testClock{time.Unix(0, 0)}, nil)
+	if _, err := m.Reselect(context.Background(), MakeSlots(1, 20001)[0]); err != ErrNoHealthyNode {
+		t.Fatalf("Reselect err = %v, want ErrNoHealthyNode", err)
+	}
+	if len(f.selects) != 0 {
+		t.Fatalf("selection must not change, selects = %v", f.selects)
+	}
+}

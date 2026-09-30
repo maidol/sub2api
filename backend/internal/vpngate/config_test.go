@@ -24,7 +24,7 @@ func testNodes(names ...string) []Node {
 func testRenderOptions() RenderOptions {
 	return RenderOptions{
 		ListenAddr:     "0.0.0.0",
-		ProxyPassword:  "p4ssw0rd-p4ssw0rd",
+		MasterSecret:   "m4ster-secret-0123",
 		ControllerAddr: "127.0.0.1:19090",
 		Secret:         "s3cret",
 		DNS:            []string{"1.1.1.1"},
@@ -101,10 +101,10 @@ func TestRenderConfigPinsEachListenerToItsOwnGroupWithoutDirect(t *testing.T) {
 		if !reflect.DeepEqual(got, []string{"A", "B", "C"}) {
 			t.Fatalf("group %s proxies = %v, want exactly the pool", g.Name, g.Proxies)
 		}
-		if l.Type != "http" || l.Listen != "0.0.0.0" || l.Port != s.Port || l.Proxy != g.Name {
-			t.Fatalf("listener %d = %+v, want http on %d bound to %s", i, l, s.Port, g.Name)
+		if l.Type != "mixed" || l.Listen != "0.0.0.0" || l.Port != s.Port || l.Proxy != g.Name {
+			t.Fatalf("listener %d = %+v, want mixed on %d bound to %s", i, l, s.Port, g.Name)
 		}
-		wantUsers := []map[string]string{{"username": s.Name, "password": "p4ssw0rd-p4ssw0rd"}}
+		wantUsers := []map[string]string{{"username": s.Name, "password": SlotPassword("m4ster-secret-0123", s.Name)}}
 		if !reflect.DeepEqual(l.Users, wantUsers) {
 			t.Fatalf("listener %d users = %v, want %v", i, l.Users, wantUsers)
 		}
@@ -145,7 +145,7 @@ func TestRenderConfigShufflesEveryGroupSeparately(t *testing.T) {
 
 func TestRenderConfigRejectsMissingSecrets(t *testing.T) {
 	for _, mutate := range []func(*RenderOptions){
-		func(o *RenderOptions) { o.ProxyPassword = "" },
+		func(o *RenderOptions) { o.MasterSecret = "" },
 		func(o *RenderOptions) { o.Secret = "" },
 		func(o *RenderOptions) { o.DNS = nil },
 	} {
@@ -162,5 +162,24 @@ func TestMakeSlots(t *testing.T) {
 	want := []Slot{{"slot01", 20001}, {"slot02", 20002}, {"slot03", 20003}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("MakeSlots = %+v, want %+v", got, want)
+	}
+}
+
+func TestSlotPasswordIsPerSlotAndStable(t *testing.T) {
+	a1 := SlotPassword("m4ster-secret-0123", "slot01")
+	if a1 != SlotPassword("m4ster-secret-0123", "slot01") {
+		t.Fatal("SlotPassword must be deterministic: Sub2API stores it and a restart must not change it")
+	}
+	if len(a1) != 32 {
+		t.Fatalf("len = %d, want 32 hex chars", len(a1))
+	}
+	if a1 == SlotPassword("m4ster-secret-0123", "slot02") {
+		t.Fatal("two slots must not share a password")
+	}
+	if a1 == SlotPassword("another-secret-0123", "slot01") {
+		t.Fatal("the password must depend on the master secret")
+	}
+	if a1 == "m4ster-secret-0123" || strings.Contains(a1, "m4ster") {
+		t.Fatal("the master secret must not appear in a slot password")
 	}
 }

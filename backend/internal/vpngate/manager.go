@@ -2,8 +2,13 @@ package vpngate
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"time"
 )
+
+// ErrNoHealthyNode means no node was healthy, free and out of cooldown.
+var ErrNoHealthyNode = errors.New("no healthy free node")
 
 // ManagerOptions tunes health checking and reselection.
 type ManagerOptions struct {
@@ -12,16 +17,24 @@ type ManagerOptions struct {
 	FailThreshold int           // consecutive probe failures before a slot moves
 	Cooldown      time.Duration // a failed node is not picked again for this long
 	MaxAttempts   int           // candidates probed per reselection
-	Now           func() time.Time
-	Shuffle       func([]string)
-	Logf          func(format string, args ...any)
+	// Active returns the slots that are in use (leased). Only they are
+	// health-checked, and only their nodes count as taken. nil means all slots.
+	Active  func() []Slot
+	Now     func() time.Time
+	Shuffle func([]string)
+	Logf    func(format string, args ...any)
 }
 
-// Manager keeps every slot on a healthy node. A slot keeps its node for as
-// long as the node passes probes; only after FailThreshold consecutive
+// Manager keeps every active slot on a healthy node. A slot keeps its node for
+// as long as the node passes probes; only after FailThreshold consecutive
 // failures (or when two slots share a node) does it move to a random node
-// that is healthy, not in cooldown, and not used by any other slot.
+// that is healthy, not in cooldown, and not used by any other active slot.
+// Reselect moves a slot on demand (new lease, "rotate").
+//
+// All methods are safe for concurrent use; they serialise on one mutex, so a
+// Reselect waits for a running Tick to finish.
 type Manager struct {
+	mu       sync.Mutex
 	ctrl     Controller
 	slots    []Slot
 	nodes    []string
@@ -60,6 +73,13 @@ func NewManager(ctrl Controller, slots []Slot, nodes []Node, opts ManagerOptions
 	}
 }
 
+func (m *Manager) active() []Slot {
+	if m.opts.Active == nil {
+		return m.slots
+	}
+	return m.opts.Active()
+}
+
 // Run pins every slot's starting node, calls Tick immediately and then every
 // interval until ctx is done.
 func (m *Manager) Run(ctx context.Context, interval time.Duration) {
@@ -82,6 +102,8 @@ func (m *Manager) Run(ctx context.Context, interval time.Duration) {
 // group's initial node comes from the shuffled config, which is re-rolled on
 // every start, so without this a restart moves every slot that never failed.
 func (m *Manager) PinCurrent(ctx context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, s := range m.slots {
 		node, err := m.ctrl.Current(ctx, s.Group())
 		if err != nil {
@@ -94,11 +116,21 @@ func (m *Manager) PinCurrent(ctx context.Context) {
 	}
 }
 
-// Tick checks every slot once.
+// CurrentNode returns the node a slot currently uses.
+func (m *Manager) CurrentNode(ctx context.Context, s Slot) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ctrl.Current(ctx, s.Group())
+}
+
+// Tick checks every active slot once.
 func (m *Manager) Tick(ctx context.Context) {
+	slots := m.active()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	now := m.opts.Now()
-	current := make(map[string]string, len(m.slots)) // slot name -> node
-	for _, s := range m.slots {
+	current := make(map[string]string, len(slots)) // slot name -> node
+	for _, s := range slots {
 		node, err := m.ctrl.Current(ctx, s.Group())
 		if err != nil {
 			m.opts.Logf("vpngate: %s: read selection: %v", s.Name, err)
@@ -108,7 +140,7 @@ func (m *Manager) Tick(ctx context.Context) {
 	}
 
 	claimed := map[string]string{} // node -> slot that holds it this tick
-	for _, s := range m.slots {
+	for _, s := range slots {
 		cur, ok := current[s.Name]
 		if !ok {
 			continue
@@ -135,7 +167,39 @@ func (m *Manager) Tick(ctx context.Context) {
 	}
 }
 
-func (m *Manager) reselect(ctx context.Context, s Slot, cur string, current, claimed map[string]string, now time.Time) {
+// Reselect moves slot s to a different random node that is healthy, out of
+// cooldown and not used by any active slot. Its current node goes into
+// cooldown, so a rotated-away node is not handed to the next lease at once.
+// s itself need not be active yet (a new lease reselects before it counts).
+func (m *Manager) Reselect(ctx context.Context, s Slot) (string, error) {
+	slots := m.active()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.opts.Now()
+	cur, err := m.ctrl.Current(ctx, s.Group())
+	if err != nil {
+		return "", err
+	}
+	current := map[string]string{}
+	for _, o := range slots {
+		if o.Name == s.Name {
+			continue
+		}
+		node, err := m.ctrl.Current(ctx, o.Group())
+		if err != nil {
+			return "", err
+		}
+		current[o.Name] = node
+	}
+	m.badUntil[cur] = now.Add(m.opts.Cooldown)
+	node, ok := m.reselect(ctx, s, cur, current, map[string]string{}, now)
+	if !ok {
+		return "", ErrNoHealthyNode
+	}
+	return node, nil
+}
+
+func (m *Manager) reselect(ctx context.Context, s Slot, cur string, current, claimed map[string]string, now time.Time) (string, bool) {
 	inUse := map[string]bool{}
 	for name, node := range current {
 		if name != s.Name {
@@ -164,15 +228,16 @@ func (m *Manager) reselect(ctx context.Context, s Slot, cur string, current, cla
 		}
 		if err := m.ctrl.Select(ctx, s.Group(), c); err != nil {
 			m.opts.Logf("vpngate: %s: select %q failed: %v", s.Name, c, err)
-			return
+			return "", false
 		}
 		m.opts.Logf("vpngate: %s: switched %q -> %q", s.Name, cur, c)
 		current[s.Name] = c
 		claimed[c] = s.Name
 		m.fails[s.Name] = 0
-		return
+		return c, true
 	}
 	// No DIRECT fallback: if cur is dead, this slot's traffic fails until a
 	// later tick finds a node.
 	m.opts.Logf("vpngate: %s: no healthy free node (tried %d); keeping %q", s.Name, len(candidates), cur)
+	return "", false
 }

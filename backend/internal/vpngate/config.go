@@ -1,7 +1,10 @@
 package vpngate
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 
@@ -11,8 +14,8 @@ import (
 const groupPrefix = "sub2api-"
 
 // Slot is one listener/select-group pair. Name doubles as the listener's
-// proxy username, so a Sub2API Proxy row for it is
-// http://<Name>:<password>@<host>:<Port>.
+// proxy username and SlotPassword derives its password, so a lease on it is
+// http://<Name>:<SlotPassword>@<host>:<Port> (or socks5:// on the same port).
 type Slot struct {
 	Name string
 	Port int
@@ -30,10 +33,19 @@ func MakeSlots(count, basePort int) []Slot {
 	return slots
 }
 
+// SlotPassword derives a slot listener's password from the master secret.
+// Each slot has its own password, so credentials handed out for one lease
+// do not open any other slot.
+func SlotPassword(master, slot string) string {
+	mac := hmac.New(sha256.New, []byte(master))
+	mac.Write([]byte("vpngate-slot:" + slot))
+	return hex.EncodeToString(mac.Sum(nil))[:32]
+}
+
 // RenderOptions controls the generated Mihomo config.
 type RenderOptions struct {
 	ListenAddr     string   // listener bind address, e.g. 0.0.0.0
-	ProxyPassword  string   // shared password for every slot listener
+	MasterSecret   string   // SlotPassword derives each listener's password from it
 	ControllerAddr string   // loopback address for the external controller
 	Secret         string   // external controller bearer secret
 	DNS            []string // nameservers used inside each tunnel
@@ -54,8 +66,8 @@ func RenderConfig(nodes []Node, slots []Slot, opts RenderOptions) ([]byte, error
 	if len(slots) == 0 {
 		return nil, fmt.Errorf("no slots")
 	}
-	if opts.ProxyPassword == "" || opts.Secret == "" || opts.ControllerAddr == "" || opts.ListenAddr == "" {
-		return nil, fmt.Errorf("listen address, proxy password, controller address and secret are required")
+	if opts.MasterSecret == "" || opts.Secret == "" || opts.ControllerAddr == "" || opts.ListenAddr == "" {
+		return nil, fmt.Errorf("listen address, master secret, controller address and secret are required")
 	}
 	if len(opts.DNS) == 0 {
 		return nil, fmt.Errorf("at least one tunnel DNS server is required")
@@ -90,11 +102,11 @@ func RenderConfig(nodes []Node, slots []Slot, opts RenderOptions) ([]byte, error
 		})
 		listeners = append(listeners, map[string]any{
 			"name":   "in-" + s.Name,
-			"type":   "http",
+			"type":   "mixed", // http and socks5 on the same port, both authenticated
 			"listen": opts.ListenAddr,
 			"port":   s.Port,
 			"proxy":  s.Group(),
-			"users":  []map[string]any{{"username": s.Name, "password": opts.ProxyPassword}},
+			"users":  []map[string]any{{"username": s.Name, "password": SlotPassword(opts.MasterSecret, s.Name)}},
 		})
 	}
 

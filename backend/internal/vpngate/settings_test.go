@@ -13,8 +13,15 @@ func envOf(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
+func requiredEnv() map[string]string {
+	return map[string]string{
+		"VPNGATE_MASTER_SECRET": "abcdefghijklmnop",
+		"VPNGATE_API_TOKEN":     "token-0123456789ab",
+	}
+}
+
 func TestLoadSettingsDefaults(t *testing.T) {
-	s, err := LoadSettings(envOf(map[string]string{"VPNGATE_PROXY_PASSWORD": "abcdefghijklmnop"}))
+	s, err := LoadSettings(envOf(requiredEnv()))
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
@@ -23,10 +30,13 @@ func TestLoadSettingsDefaults(t *testing.T) {
 		WorkDir:        "/data/state",
 		MihomoBin:      "/usr/local/bin/mihomo",
 		ControllerAddr: "127.0.0.1:19090",
+		APIListen:      "0.0.0.0:20000",
+		APIToken:       "token-0123456789ab",
+		PublicHost:     "vpngate",
 		Slots:          10,
 		BasePort:       20001,
 		ListenAddr:     "0.0.0.0",
-		ProxyPassword:  "abcdefghijklmnop",
+		MasterSecret:   "abcdefghijklmnop",
 		DNS:            []string{"1.1.1.1", "8.8.8.8"},
 		ProbeURL:       "https://www.gstatic.com/generate_204",
 		ProbeTimeout:   10 * time.Second,
@@ -43,20 +53,30 @@ func TestLoadSettingsDefaults(t *testing.T) {
 
 func TestLoadSettingsRejectsBadValues(t *testing.T) {
 	cases := map[string]map[string]string{
-		"missing password":  {},
-		"short password":    {"VPNGATE_PROXY_PASSWORD": "short"},
-		"password with @":   {"VPNGATE_PROXY_PASSWORD": "abcdefgh@ijklmnop"},
-		"password too long": {"VPNGATE_PROXY_PASSWORD": strings.Repeat("a", 101)},
-		"bad duration":      {"VPNGATE_PROXY_PASSWORD": "abcdefghijklmnop", "VPNGATE_PROBE_INTERVAL": "60"},
-		"zero slots":        {"VPNGATE_PROXY_PASSWORD": "abcdefghijklmnop", "VPNGATE_SLOTS": "0"},
-		"too many slots":    {"VPNGATE_PROXY_PASSWORD": "abcdefghijklmnop", "VPNGATE_SLOTS": "201"},
-		"empty dns list":    {"VPNGATE_PROXY_PASSWORD": "abcdefghijklmnop", "VPNGATE_DNS": " , "},
-		"public controller": {"VPNGATE_PROXY_PASSWORD": "abcdefghijklmnop", "VPNGATE_CONTROLLER_ADDR": "0.0.0.0:19090"},
-		"threshold not int": {"VPNGATE_PROXY_PASSWORD": "abcdefghijklmnop", "VPNGATE_FAIL_THRESHOLD": "three"},
+		"missing master secret": {"VPNGATE_MASTER_SECRET": ""},
+		"short master secret":   {"VPNGATE_MASTER_SECRET": "short"},
+		"missing api token":     {"VPNGATE_API_TOKEN": ""},
+		"short api token":       {"VPNGATE_API_TOKEN": "short"},
+		"host with port":        {"VPNGATE_PUBLIC_HOST": "vpngate:20001"},
+		"bad duration":          {"VPNGATE_PROBE_INTERVAL": "60"},
+		"zero slots":            {"VPNGATE_SLOTS": "0"},
+		"too many slots":        {"VPNGATE_SLOTS": "201"},
+		"empty dns list":        {"VPNGATE_DNS": " , "},
+		"public controller":     {"VPNGATE_CONTROLLER_ADDR": "0.0.0.0:19090"},
+		"threshold not int":     {"VPNGATE_FAIL_THRESHOLD": "three"},
 	}
-	for name, env := range cases {
-		if _, err := LoadSettings(envOf(env)); err == nil {
+	for name, override := range cases {
+		env := requiredEnv()
+		for k, v := range override {
+			env[k] = v
+		}
+		_, err := LoadSettings(envOf(env))
+		if err == nil {
 			t.Errorf("%s: expected an error", name)
+			continue
+		}
+		if strings.Count(err.Error(), ";")+1 != 1 {
+			t.Errorf("%s: expected exactly one problem, got %v", name, err)
 		}
 	}
 }

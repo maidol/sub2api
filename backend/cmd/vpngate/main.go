@@ -1,6 +1,7 @@
 // Command vpngate is the VPN Gate sidecar: it renders a Mihomo config with one
-// authenticated HTTP listener per slot, runs Mihomo as a child process, and
-// keeps every slot on a healthy, randomly chosen VPN Gate node.
+// authenticated http/socks5 listener per slot, runs Mihomo as a child process,
+// hands slots out as leases over an HTTP API, and keeps every leased slot on a
+// healthy, randomly chosen VPN Gate node.
 package main
 
 import (
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -52,7 +54,7 @@ func run() error {
 	secret := hex.EncodeToString(secretBytes)
 	config, err := vpngate.RenderConfig(nodes, slots, vpngate.RenderOptions{
 		ListenAddr:     settings.ListenAddr,
-		ProxyPassword:  settings.ProxyPassword,
+		MasterSecret:   settings.MasterSecret,
 		ControllerAddr: settings.ControllerAddr,
 		Secret:         secret,
 		DNS:            settings.DNS,
@@ -87,8 +89,17 @@ func run() error {
 		_ = cmd.Process.Kill()
 		return err
 	}
-	log.Printf("vpngate: %d nodes, %d slots on %s ports %d-%d (username = slot name)",
-		len(nodes), len(slots), settings.ListenAddr, slots[0].Port, slots[len(slots)-1].Port)
+	store, dropped, err := vpngate.OpenLeaseStore(filepath.Join(settings.WorkDir, "leases.json"), slots)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		return err
+	}
+	for _, l := range dropped {
+		log.Printf("vpngate: dropped lease %s (%q): slot %s no longer exists", l.ID, l.ClientRef, l.Slot)
+	}
+	log.Printf("vpngate: %d nodes, %d slots on %s ports %d-%d, %d leased; lease API on %s",
+		len(nodes), len(slots), settings.ListenAddr, slots[0].Port, slots[len(slots)-1].Port,
+		len(store.List()), settings.APIListen)
 
 	mgr := vpngate.NewManager(ctrl, slots, nodes, vpngate.ManagerOptions{
 		ProbeURL:      settings.ProbeURL,
@@ -96,16 +107,39 @@ func run() error {
 		FailThreshold: settings.FailThreshold,
 		Cooldown:      settings.Cooldown,
 		MaxAttempts:   settings.MaxAttempts,
+		Active:        store.ActiveSlots,
 		Logf:          log.Printf,
 	})
 	mgrCtx, cancelMgr := context.WithCancel(ctx)
 	defer cancelMgr()
 	go mgr.Run(mgrCtx, settings.ProbeInterval)
 
+	api := &vpngate.API{
+		Token:      settings.APIToken,
+		PublicHost: settings.PublicHost,
+		Master:     settings.MasterSecret,
+		Store:      store,
+		Mgr:        mgr,
+		NodeCount:  len(nodes),
+		Logf:       log.Printf,
+	}
+	srv := &http.Server{Addr: settings.APIListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	apiErr := make(chan error, 1)
+	go func() { apiErr <- srv.ListenAndServe() }()
+
 	select {
 	case err := <-exited:
+		_ = srv.Close()
 		return fmt.Errorf("mihomo exited: %v", err)
+	case err := <-apiErr:
+		cancelMgr()
+		_ = cmd.Process.Kill()
+		<-exited
+		return fmt.Errorf("lease API: %v", err)
 	case <-ctx.Done():
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = srv.Shutdown(shutdownCtx)
+		cancelShutdown()
 		cancelMgr()
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		select {
