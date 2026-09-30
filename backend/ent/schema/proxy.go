@@ -64,6 +64,12 @@ func (Proxy) Fields() []ent.Field {
 		field.Int("expiry_warn_days").
 			Default(7).
 			Comment("Days before expiry to flag as expiring-soon (per proxy)."),
+		field.String("managed_by").
+			MaxLen(20).Default("").
+			Comment("Empty for a hand-made proxy; \"pool\" for one leased from the proxy pool provider."),
+		field.String("external_ref").
+			MaxLen(100).Default("").
+			Comment("Provider lease ID when managed_by is set."),
 	}
 }
 

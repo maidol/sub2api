@@ -448,6 +448,9 @@ type Proxy struct {
 	FallbackMode   string     `json:"fallback_mode"`
 	BackupProxyID  *int64     `json:"backup_proxy_id"`
 	ExpiryWarnDays int        `json:"expiry_warn_days"`
+	// Managed is true for a proxy leased from the proxy pool: it belongs to
+	// the account that leased it and must not be offered to other accounts.
+	Managed bool `json:"managed"`
 }
 
 type ProxyWithAccountCount struct {

@@ -187,6 +187,34 @@ func (_c *ProxyCreate) SetNillableExpiryWarnDays(v *int) *ProxyCreate {
 	return _c
 }
 
+// SetManagedBy sets the "managed_by" field.
+func (_c *ProxyCreate) SetManagedBy(v string) *ProxyCreate {
+	_c.mutation.SetManagedBy(v)
+	return _c
+}
+
+// SetNillableManagedBy sets the "managed_by" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableManagedBy(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetManagedBy(*v)
+	}
+	return _c
+}
+
+// SetExternalRef sets the "external_ref" field.
+func (_c *ProxyCreate) SetExternalRef(v string) *ProxyCreate {
+	_c.mutation.SetExternalRef(v)
+	return _c
+}
+
+// SetNillableExternalRef sets the "external_ref" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableExternalRef(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetExternalRef(*v)
+	}
+	return _c
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *ProxyCreate) AddAccountIDs(ids ...int64) *ProxyCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -285,6 +313,14 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultExpiryWarnDays
 		_c.mutation.SetExpiryWarnDays(v)
 	}
+	if _, ok := _c.mutation.ManagedBy(); !ok {
+		v := proxy.DefaultManagedBy
+		_c.mutation.SetManagedBy(v)
+	}
+	if _, ok := _c.mutation.ExternalRef(); !ok {
+		v := proxy.DefaultExternalRef
+		_c.mutation.SetExternalRef(v)
+	}
 	return nil
 }
 
@@ -351,6 +387,22 @@ func (_c *ProxyCreate) check() error {
 	}
 	if _, ok := _c.mutation.ExpiryWarnDays(); !ok {
 		return &ValidationError{Name: "expiry_warn_days", err: errors.New(`ent: missing required field "Proxy.expiry_warn_days"`)}
+	}
+	if _, ok := _c.mutation.ManagedBy(); !ok {
+		return &ValidationError{Name: "managed_by", err: errors.New(`ent: missing required field "Proxy.managed_by"`)}
+	}
+	if v, ok := _c.mutation.ManagedBy(); ok {
+		if err := proxy.ManagedByValidator(v); err != nil {
+			return &ValidationError{Name: "managed_by", err: fmt.Errorf(`ent: validator failed for field "Proxy.managed_by": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ExternalRef(); !ok {
+		return &ValidationError{Name: "external_ref", err: errors.New(`ent: missing required field "Proxy.external_ref"`)}
+	}
+	if v, ok := _c.mutation.ExternalRef(); ok {
+		if err := proxy.ExternalRefValidator(v); err != nil {
+			return &ValidationError{Name: "external_ref", err: fmt.Errorf(`ent: validator failed for field "Proxy.external_ref": %w`, err)}
+		}
 	}
 	return nil
 }
@@ -430,6 +482,14 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExpiryWarnDays(); ok {
 		_spec.SetField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
 		_node.ExpiryWarnDays = value
+	}
+	if value, ok := _c.mutation.ManagedBy(); ok {
+		_spec.SetField(proxy.FieldManagedBy, field.TypeString, value)
+		_node.ManagedBy = value
+	}
+	if value, ok := _c.mutation.ExternalRef(); ok {
+		_spec.SetField(proxy.FieldExternalRef, field.TypeString, value)
+		_node.ExternalRef = value
 	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -730,6 +790,30 @@ func (u *ProxyUpsert) AddExpiryWarnDays(v int) *ProxyUpsert {
 	return u
 }
 
+// SetManagedBy sets the "managed_by" field.
+func (u *ProxyUpsert) SetManagedBy(v string) *ProxyUpsert {
+	u.Set(proxy.FieldManagedBy, v)
+	return u
+}
+
+// UpdateManagedBy sets the "managed_by" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateManagedBy() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldManagedBy)
+	return u
+}
+
+// SetExternalRef sets the "external_ref" field.
+func (u *ProxyUpsert) SetExternalRef(v string) *ProxyUpsert {
+	u.Set(proxy.FieldExternalRef, v)
+	return u
+}
+
+// UpdateExternalRef sets the "external_ref" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateExternalRef() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldExternalRef)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -1003,6 +1087,34 @@ func (u *ProxyUpsertOne) AddExpiryWarnDays(v int) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateExpiryWarnDays() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExpiryWarnDays()
+	})
+}
+
+// SetManagedBy sets the "managed_by" field.
+func (u *ProxyUpsertOne) SetManagedBy(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetManagedBy(v)
+	})
+}
+
+// UpdateManagedBy sets the "managed_by" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateManagedBy() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateManagedBy()
+	})
+}
+
+// SetExternalRef sets the "external_ref" field.
+func (u *ProxyUpsertOne) SetExternalRef(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetExternalRef(v)
+	})
+}
+
+// UpdateExternalRef sets the "external_ref" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateExternalRef() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateExternalRef()
 	})
 }
 
@@ -1445,6 +1557,34 @@ func (u *ProxyUpsertBulk) AddExpiryWarnDays(v int) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateExpiryWarnDays() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExpiryWarnDays()
+	})
+}
+
+// SetManagedBy sets the "managed_by" field.
+func (u *ProxyUpsertBulk) SetManagedBy(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetManagedBy(v)
+	})
+}
+
+// UpdateManagedBy sets the "managed_by" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateManagedBy() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateManagedBy()
+	})
+}
+
+// SetExternalRef sets the "external_ref" field.
+func (u *ProxyUpsertBulk) SetExternalRef(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetExternalRef(v)
+	})
+}
+
+// UpdateExternalRef sets the "external_ref" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateExternalRef() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateExternalRef()
 	})
 }
 

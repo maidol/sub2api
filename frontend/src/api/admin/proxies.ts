@@ -264,6 +264,48 @@ export async function importData(payload: {
   return data
 }
 
+/** Proxy pool provider settings; the token itself is never returned. */
+export interface ProxyPoolConfig {
+  url: string
+  url_source: 'setting' | 'env' | ''
+  token_source: 'setting' | 'env' | ''
+  token_configured: boolean
+}
+
+export async function getPoolConfig(): Promise<ProxyPoolConfig> {
+  const { data } = await apiClient.get<ProxyPoolConfig>('/admin/proxies/pool/config')
+  return data
+}
+
+/**
+ * Save provider settings. url '' removes the saved URL (the environment
+ * variable applies again). Omit token to keep the saved one; '' removes it.
+ */
+export async function updatePoolConfig(payload: {
+  url: string
+  token?: string
+}): Promise<ProxyPoolConfig> {
+  const { data } = await apiClient.put<ProxyPoolConfig>('/admin/proxies/pool/config', payload)
+  return data
+}
+
+export async function getPoolHealth(): Promise<Record<string, unknown>> {
+  const { data } = await apiClient.get<Record<string, unknown>>('/admin/proxies/pool/health')
+  return data
+}
+
+/** Lease a pool-managed proxy for one account (use its id as proxy_id). */
+export async function leaseFromPool(): Promise<Proxy> {
+  const { data } = await apiClient.post<Proxy>('/admin/proxies/pool/lease')
+  return data
+}
+
+/** Move a pool-managed proxy to another exit node; returns the new node. */
+export async function rotatePoolProxy(id: number): Promise<{ node: string }> {
+  const { data } = await apiClient.post<{ node: string }>(`/admin/proxies/${id}/pool/rotate`)
+  return data
+}
+
 export const proxiesAPI = {
   list,
   getAll,
@@ -280,7 +322,12 @@ export const proxiesAPI = {
   batchCreate,
   batchDelete,
   exportData,
-  importData
+  importData,
+  getPoolConfig,
+  updatePoolConfig,
+  getPoolHealth,
+  leaseFromPool,
+  rotatePoolProxy
 }
 
 export default proxiesAPI

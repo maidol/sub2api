@@ -1717,6 +1717,18 @@ func init() {
 	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
+	// proxyDescManagedBy is the schema descriptor for managed_by field.
+	proxyDescManagedBy := proxyFields[11].Descriptor()
+	// proxy.DefaultManagedBy holds the default value on creation for the managed_by field.
+	proxy.DefaultManagedBy = proxyDescManagedBy.Default.(string)
+	// proxy.ManagedByValidator is a validator for the "managed_by" field. It is called by the builders before save.
+	proxy.ManagedByValidator = proxyDescManagedBy.Validators[0].(func(string) error)
+	// proxyDescExternalRef is the schema descriptor for external_ref field.
+	proxyDescExternalRef := proxyFields[12].Descriptor()
+	// proxy.DefaultExternalRef holds the default value on creation for the external_ref field.
+	proxy.DefaultExternalRef = proxyDescExternalRef.Default.(string)
+	// proxy.ExternalRefValidator is a validator for the "external_ref" field. It is called by the builders before save.
+	proxy.ExternalRefValidator = proxyDescExternalRef.Validators[0].(func(string) error)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.

@@ -957,6 +957,8 @@ export interface Proxy {
   expires_at: string | null
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
+  /** Leased from the proxy pool; belongs to one account. */
+  managed?: boolean
   expiry_warn_days: number
   created_at: string
   updated_at: string

@@ -112,6 +112,38 @@ export default {
       allProtocols: '全部协议',
       allStatus: '全部状态',
       searchProxies: '搜索代理...',
+      pool: {
+        option: '代理池（自动分配）',
+        optionHint: '从代理池为该账号租一个独占出口',
+        leasing: '正在从代理池租用代理…',
+        leased: '已租到 {name}，保存账号后生效',
+        leaseFailed: '从代理池租用代理失败',
+        managedBadge: '代理池',
+        rotate: '换一个出口',
+        rotating: '正在更换出口…',
+        rotated: '出口已换到 {node}',
+        rotateFailed: '更换出口失败',
+        settings: '代理池设置',
+        settingsHint:
+          '代理池模式的提供方（vpngate sidecar 的租约 API）。这里保存的值优先于环境变量 PROXY_POOL_URL / PROXY_POOL_TOKEN。「测试连接」使用已保存的设置。',
+        url: '提供方地址',
+        urlPlaceholder: 'http://vpngate:20000（留空则使用 PROXY_POOL_URL）',
+        token: '令牌',
+        tokenPlaceholderKeep: '已配置，留空则保持不变',
+        tokenPlaceholderNew: '提供方的 Bearer 令牌',
+        clearToken: '移除这里保存的令牌',
+        source: {
+          label: '当前取值',
+          setting: '在此保存',
+          env: '来自环境变量',
+          none: '未设置'
+        },
+        test: '测试连接',
+        testOk: '提供方可用：已租出 {leased}/{slots}，节点 {nodes} 个',
+        testFailed: '无法连接提供方',
+        saved: '代理池设置已保存',
+        saveFailed: '保存代理池设置失败'
+      },
       protocols: {
         http: 'HTTP',
         https: 'HTTPS',

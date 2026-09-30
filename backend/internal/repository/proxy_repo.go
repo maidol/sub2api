@@ -54,6 +54,9 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 	if proxyIn.BackupProxyID != nil {
 		builder.SetBackupProxyID(*proxyIn.BackupProxyID)
 	}
+	if proxyIn.ManagedBy != "" {
+		builder.SetManagedBy(proxyIn.ManagedBy).SetExternalRef(proxyIn.ExternalRef)
+	}
 
 	created, err := builder.Save(ctx)
 	if err == nil {
@@ -601,6 +604,8 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		FallbackMode:   m.FallbackMode,
 		BackupProxyID:  m.BackupProxyID,
 		ExpiryWarnDays: m.ExpiryWarnDays,
+		ManagedBy:      m.ManagedBy,
+		ExternalRef:    m.ExternalRef,
 	}
 	if m.Username != nil {
 		out.Username = *m.Username

@@ -435,6 +435,15 @@ func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	return svc
 }
 
+// ProvideProxyPoolService creates ProxyPoolService and starts its reconcile
+// loop. PROXY_POOL_URL / PROXY_POOL_TOKEN are the fallback when the admin UI
+// has not saved a provider.
+func ProvideProxyPoolService(settingRepo SettingRepository, proxyRepo ProxyRepository) *ProxyPoolService {
+	svc := NewProxyPoolService(settingRepo, proxyRepo, os.Getenv("PROXY_POOL_URL"), os.Getenv("PROXY_POOL_TOKEN"), 10*time.Minute)
+	svc.Start()
+	return svc
+}
+
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
 func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
@@ -942,6 +951,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpenAICodexVersionSyncService,
 	ProvideClaudeCodeVersionSyncService,
 	ProvideProxyExpiryService,
+	ProvideProxyPoolService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,
 	ProvideDashboardAggregationService,

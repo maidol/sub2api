@@ -247,6 +247,34 @@ func (_u *ProxyUpdate) AddExpiryWarnDays(v int) *ProxyUpdate {
 	return _u
 }
 
+// SetManagedBy sets the "managed_by" field.
+func (_u *ProxyUpdate) SetManagedBy(v string) *ProxyUpdate {
+	_u.mutation.SetManagedBy(v)
+	return _u
+}
+
+// SetNillableManagedBy sets the "managed_by" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableManagedBy(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetManagedBy(*v)
+	}
+	return _u
+}
+
+// SetExternalRef sets the "external_ref" field.
+func (_u *ProxyUpdate) SetExternalRef(v string) *ProxyUpdate {
+	_u.mutation.SetExternalRef(v)
+	return _u
+}
+
+// SetNillableExternalRef sets the "external_ref" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableExternalRef(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetExternalRef(*v)
+	}
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdate) AddAccountIDs(ids ...int64) *ProxyUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -414,6 +442,16 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ManagedBy(); ok {
+		if err := proxy.ManagedByValidator(v); err != nil {
+			return &ValidationError{Name: "managed_by", err: fmt.Errorf(`ent: validator failed for field "Proxy.managed_by": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ExternalRef(); ok {
+		if err := proxy.ExternalRefValidator(v); err != nil {
+			return &ValidationError{Name: "external_ref", err: fmt.Errorf(`ent: validator failed for field "Proxy.external_ref": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -482,6 +520,12 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ManagedBy(); ok {
+		_spec.SetField(proxy.FieldManagedBy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExternalRef(); ok {
+		_spec.SetField(proxy.FieldExternalRef, field.TypeString, value)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -840,6 +884,34 @@ func (_u *ProxyUpdateOne) AddExpiryWarnDays(v int) *ProxyUpdateOne {
 	return _u
 }
 
+// SetManagedBy sets the "managed_by" field.
+func (_u *ProxyUpdateOne) SetManagedBy(v string) *ProxyUpdateOne {
+	_u.mutation.SetManagedBy(v)
+	return _u
+}
+
+// SetNillableManagedBy sets the "managed_by" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableManagedBy(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetManagedBy(*v)
+	}
+	return _u
+}
+
+// SetExternalRef sets the "external_ref" field.
+func (_u *ProxyUpdateOne) SetExternalRef(v string) *ProxyUpdateOne {
+	_u.mutation.SetExternalRef(v)
+	return _u
+}
+
+// SetNillableExternalRef sets the "external_ref" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableExternalRef(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetExternalRef(*v)
+	}
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdateOne) AddAccountIDs(ids ...int64) *ProxyUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -1020,6 +1092,16 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ManagedBy(); ok {
+		if err := proxy.ManagedByValidator(v); err != nil {
+			return &ValidationError{Name: "managed_by", err: fmt.Errorf(`ent: validator failed for field "Proxy.managed_by": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ExternalRef(); ok {
+		if err := proxy.ExternalRefValidator(v); err != nil {
+			return &ValidationError{Name: "external_ref", err: fmt.Errorf(`ent: validator failed for field "Proxy.external_ref": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -1105,6 +1187,12 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ManagedBy(); ok {
+		_spec.SetField(proxy.FieldManagedBy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExternalRef(); ok {
+		_spec.SetField(proxy.FieldExternalRef, field.TypeString, value)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{

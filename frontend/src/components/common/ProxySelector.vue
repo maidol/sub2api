@@ -38,7 +38,7 @@
             />
           </div>
           <button
-            v-if="proxies.length > 0"
+            v-if="selectableProxies.length > 0"
             type="button"
             @click.stop="handleBatchTest"
             :disabled="batchTesting"
@@ -73,6 +73,21 @@
           >
             <span class="select-option-label">{{ t('admin.accounts.noProxy') }}</span>
             <Icon v-if="modelValue === null" name="check" size="sm" class="text-primary-500" />
+          </div>
+
+          <!-- Proxy pool option: lease a dedicated, pool-managed proxy -->
+          <div
+            v-if="allowPool"
+            @click="handlePoolOption"
+            :class="['select-option', 'pool-option', selectedProxy?.managed && 'select-option-selected']"
+          >
+            <div class="min-w-0 flex-1">
+              <div class="truncate font-medium">{{ t('admin.proxies.pool.option') }}</div>
+              <div class="truncate text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.proxies.pool.optionHint') }}
+              </div>
+            </div>
+            <Icon v-if="selectedProxy?.managed" name="check" size="sm" class="text-primary-500" />
           </div>
 
           <!-- Proxy options -->
@@ -164,6 +179,24 @@
         </div>
       </div>
     </Transition>
+
+    <!-- Proxy pool status: badge, lease/rotate progress, change-exit button -->
+    <div v-if="allowPool && (selectedProxy?.managed || leasing || poolMessage)" class="pool-status">
+      <span v-if="selectedProxy?.managed" class="pool-badge">{{ t('admin.proxies.pool.managedBadge') }}</span>
+      <span v-if="leasing">{{ t('admin.proxies.pool.leasing') }}</span>
+      <span v-else-if="poolMessage" :class="['pool-message', poolError && 'pool-message-error']">{{
+        poolMessage
+      }}</span>
+      <button
+        v-if="selectedProxy?.managed"
+        type="button"
+        class="pool-rotate-btn"
+        :disabled="rotating || leasing || disabled"
+        @click="handleRotate"
+      >
+        {{ rotating ? t('admin.proxies.pool.rotating') : t('admin.proxies.pool.rotate') }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -190,14 +223,18 @@ interface Props {
   modelValue: number | null
   proxies: Proxy[]
   disabled?: boolean
+  /** Offer "proxy pool (auto)": lease a pool-managed proxy for this account. */
+  allowPool?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  disabled: false
+  disabled: false,
+  allowPool: false
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: number | null]
+  leased: [proxy: Proxy]
 }>()
 
 const isOpen = ref(false)
@@ -210,9 +247,27 @@ const testResults = reactive<Record<number, ProxyTestResult>>({})
 const testingProxyIds = reactive(new Set<number>())
 const batchTesting = ref(false)
 
+// Proxy pool state
+const leasedProxies = ref<Proxy[]>([])
+const leasing = ref(false)
+const rotating = ref(false)
+const poolMessage = ref('')
+const poolError = ref(false)
+
+// What the trigger can show: the given list plus proxies leased here that the
+// parent's list does not contain yet.
+const knownProxies = computed(() => [
+  ...props.proxies,
+  ...leasedProxies.value.filter((l) => !props.proxies.some((p) => p.id === l.id))
+])
+
+// A pool-managed proxy belongs to the one account that leased it: never offer
+// it as an option (it still shows in the trigger when it is the selection).
+const selectableProxies = computed(() => props.proxies.filter((p) => !p.managed))
+
 const selectedProxy = computed(() => {
   if (props.modelValue === null) return null
-  return props.proxies.find((p) => p.id === props.modelValue) || null
+  return knownProxies.value.find((p) => p.id === props.modelValue) || null
 })
 
 const selectedLabel = computed(() => {
@@ -225,10 +280,10 @@ const selectedLabel = computed(() => {
 
 const filteredProxies = computed(() => {
   if (!searchQuery.value) {
-    return props.proxies
+    return selectableProxies.value
   }
   const query = searchQuery.value.toLowerCase()
-  return props.proxies.filter((proxy) => {
+  return selectableProxies.value.filter((proxy) => {
     const name = proxy.name.toLowerCase()
     const host = proxy.host.toLowerCase()
     return name.includes(query) || host.includes(query)
@@ -268,13 +323,58 @@ const handleTestProxy = async (proxy: Proxy) => {
   }
 }
 
+const errorText = (error: any, fallback: string) =>
+  (typeof error?.message === 'string' && error.message) || fallback
+
+const handlePoolOption = async () => {
+  isOpen.value = false
+  searchQuery.value = ''
+  // Already on a pool-managed proxy: keep it (use "change exit" to rotate).
+  if (selectedProxy.value?.managed || leasing.value) return
+
+  leasing.value = true
+  poolMessage.value = ''
+  poolError.value = false
+  try {
+    const proxy = await adminAPI.proxies.leaseFromPool()
+    leasedProxies.value.push(proxy)
+    emit('leased', proxy)
+    emit('update:modelValue', proxy.id)
+    poolMessage.value = t('admin.proxies.pool.leased', { name: proxy.name })
+  } catch (error: any) {
+    poolError.value = true
+    poolMessage.value = errorText(error, t('admin.proxies.pool.leaseFailed'))
+  } finally {
+    leasing.value = false
+  }
+}
+
+const handleRotate = async () => {
+  const proxy = selectedProxy.value
+  if (!proxy?.managed || rotating.value) return
+
+  rotating.value = true
+  poolMessage.value = ''
+  poolError.value = false
+  try {
+    const { node } = await adminAPI.proxies.rotatePoolProxy(proxy.id)
+    delete testResults[proxy.id]
+    poolMessage.value = t('admin.proxies.pool.rotated', { node })
+  } catch (error: any) {
+    poolError.value = true
+    poolMessage.value = errorText(error, t('admin.proxies.pool.rotateFailed'))
+  } finally {
+    rotating.value = false
+  }
+}
+
 const handleBatchTest = async () => {
-  if (batchTesting.value || props.proxies.length === 0) return
+  if (batchTesting.value || selectableProxies.value.length === 0) return
 
   batchTesting.value = true
 
   // Test all proxies in parallel
-  const testPromises = props.proxies.map(handleTestProxy)
+  const testPromises = selectableProxies.value.map(handleTestProxy)
 
   await Promise.all(testPromises)
   batchTesting.value = false
@@ -396,6 +496,25 @@ onUnmounted(() => {
   @apply flex-shrink-0 rounded p-1;
   @apply text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400;
   @apply hover:bg-emerald-50 dark:hover:bg-emerald-900/20;
+  @apply transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.pool-status {
+  @apply mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-400;
+}
+
+.pool-badge {
+  @apply rounded bg-primary-50 px-1.5 py-0.5 font-medium text-primary-700;
+  @apply dark:bg-primary-900/30 dark:text-primary-300;
+}
+
+.pool-message-error {
+  @apply text-red-600 dark:text-red-400;
+}
+
+.pool-rotate-btn {
+  @apply rounded-lg border border-gray-200 px-2 py-1 dark:border-dark-600;
+  @apply hover:border-primary-400 hover:text-primary-600 dark:hover:text-primary-400;
   @apply transition-colors disabled:cursor-not-allowed disabled:opacity-50;
 }
 

@@ -43,6 +43,10 @@ const (
 	FieldBackupProxyID = "backup_proxy_id"
 	// FieldExpiryWarnDays holds the string denoting the expiry_warn_days field in the database.
 	FieldExpiryWarnDays = "expiry_warn_days"
+	// FieldManagedBy holds the string denoting the managed_by field in the database.
+	FieldManagedBy = "managed_by"
+	// FieldExternalRef holds the string denoting the external_ref field in the database.
+	FieldExternalRef = "external_ref"
 	// EdgeAccounts holds the string denoting the accounts edge name in mutations.
 	EdgeAccounts = "accounts"
 	// EdgePrimaryProxies holds the string denoting the primary_proxies edge name in mutations.
@@ -85,6 +89,8 @@ var Columns = []string{
 	FieldFallbackMode,
 	FieldBackupProxyID,
 	FieldExpiryWarnDays,
+	FieldManagedBy,
+	FieldExternalRef,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -131,6 +137,14 @@ var (
 	FallbackModeValidator func(string) error
 	// DefaultExpiryWarnDays holds the default value on creation for the "expiry_warn_days" field.
 	DefaultExpiryWarnDays int
+	// DefaultManagedBy holds the default value on creation for the "managed_by" field.
+	DefaultManagedBy string
+	// ManagedByValidator is a validator for the "managed_by" field. It is called by the builders before save.
+	ManagedByValidator func(string) error
+	// DefaultExternalRef holds the default value on creation for the "external_ref" field.
+	DefaultExternalRef string
+	// ExternalRefValidator is a validator for the "external_ref" field. It is called by the builders before save.
+	ExternalRefValidator func(string) error
 )
 
 // OrderOption defines the ordering options for the Proxy queries.
@@ -209,6 +223,16 @@ func ByBackupProxyID(opts ...sql.OrderTermOption) OrderOption {
 // ByExpiryWarnDays orders the results by the expiry_warn_days field.
 func ByExpiryWarnDays(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldExpiryWarnDays, opts...).ToFunc()
+}
+
+// ByManagedBy orders the results by the managed_by field.
+func ByManagedBy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldManagedBy, opts...).ToFunc()
+}
+
+// ByExternalRef orders the results by the external_ref field.
+func ByExternalRef(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExternalRef, opts...).ToFunc()
 }
 
 // ByAccountsCount orders the results by accounts count.

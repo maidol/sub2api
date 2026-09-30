@@ -13,6 +13,9 @@ const (
 	FallbackModeDirect = "direct"
 )
 
+// ProxyManagedByPool marks a proxy leased from the proxy pool provider.
+const ProxyManagedByPool = "pool"
+
 type Proxy struct {
 	ID             int64
 	Name           string
@@ -28,6 +31,8 @@ type Proxy struct {
 	FallbackMode   string
 	BackupProxyID  *int64
 	ExpiryWarnDays int
+	ManagedBy      string // "" = hand-made, ProxyManagedByPool = leased from the pool
+	ExternalRef    string // provider lease ID when ManagedBy is set
 }
 
 func (p *Proxy) IsActive() bool {

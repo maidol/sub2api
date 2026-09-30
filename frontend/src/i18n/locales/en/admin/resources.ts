@@ -76,6 +76,38 @@ export default {
       copyProxyUrl: 'Copy Proxy URL',
       urlCopied: 'Proxy URL copied',
       searchProxies: 'Search proxies...',
+      pool: {
+        option: 'Proxy pool (auto)',
+        optionHint: 'Lease a dedicated exit for this account from the proxy pool',
+        leasing: 'Leasing a proxy from the pool…',
+        leased: 'Leased {name}. Save the account to keep it.',
+        leaseFailed: 'Could not lease from the proxy pool',
+        managedBadge: 'Proxy pool',
+        rotate: 'Change exit',
+        rotating: 'Changing exit…',
+        rotated: 'Exit changed to {node}',
+        rotateFailed: 'Could not change the exit',
+        settings: 'Proxy pool settings',
+        settingsHint:
+          'Provider for proxy pool mode (the vpngate sidecar lease API). Values saved here take precedence over the PROXY_POOL_URL / PROXY_POOL_TOKEN environment variables. "Test connection" uses the saved settings.',
+        url: 'Provider URL',
+        urlPlaceholder: 'http://vpngate:20000 (empty: use PROXY_POOL_URL)',
+        token: 'Token',
+        tokenPlaceholderKeep: 'Configured. Leave empty to keep it.',
+        tokenPlaceholderNew: 'Bearer token of the provider',
+        clearToken: 'Remove the token saved here',
+        source: {
+          label: 'Current value',
+          setting: 'saved here',
+          env: 'from environment variable',
+          none: 'not set'
+        },
+        test: 'Test connection',
+        testOk: 'Provider reachable: {leased}/{slots} leased, {nodes} nodes',
+        testFailed: 'Provider not reachable',
+        saved: 'Proxy pool settings saved',
+        saveFailed: 'Could not save the proxy pool settings'
+      },
       allProtocols: 'All Protocols',
       allStatus: 'All Status',
       protocols: {
