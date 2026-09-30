@@ -86,7 +86,51 @@ docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 # http://localhost:8080
 ```
 
-### Method 2: Manual Deployment
+### Method 2: Upgrade an Existing Production Server from a Local Commit
+
+For the current proxy-pool functional-acceptance candidate, use the local SSH
+orchestrator instead of pulling a branch on the production server. It archives
+and checksums the exact commit, backs up PostgreSQL and `.env`, builds both
+images before downtime, applies migrations through the normal application
+startup, and rolls back the application if post-stop checks fail.
+
+The production installation must already use `docker-compose.local.yml` with
+`data/`, `postgres_data/`, and `redis_data/` beside the Compose file. The pool
+file is ignored by Git and must be supplied separately. The remote host needs
+Docker Compose v2, `jq`, `sha256sum`, and an SSH account allowed to run Docker.
+
+Before running this candidate, add stable values for these variables to the
+remote `deploy/.env` and keep them unchanged across restarts:
+
+```dotenv
+VPNGATE_MASTER_SECRET=<stable secret, at least 16 characters>
+VPNGATE_API_TOKEN=<stable secret, at least 16 characters>
+VPNGATE_SLOTS=2
+VPNGATE_BASE_PORT=20001
+```
+
+Run from a clean local worktree:
+
+```bash
+./deploy/upgrade-production-over-ssh.sh \
+  --host deploy-prod \
+  --install-dir /home/ubuntu/data/sub2api \
+  --commit abdba1d91aa09763770ce3515065bc5ae364e4dd \
+  --pool-file /secure/path/mihomo-openvpn.yaml
+```
+
+Use `--dry-run` to validate the local commit, tree, and pool file without SSH,
+SCP, Docker, or remote changes. The script never executes `docker compose down
+-v`, never deletes the three data directories, and never regenerates existing
+PostgreSQL, JWT, or TOTP secrets. It retains a timestamped PostgreSQL dump and
+release directory for manual rollback. Database restoration is not automatic;
+forward migrations must be restored manually only after explicit confirmation.
+
+This commit is a controlled functional-acceptance candidate. It passed the
+proxy-pool acceptance tests, but the acceptance record has four known
+`golangci-lint` findings; complete the lint-fix plan before public release.
+
+### Method 3: Manual Deployment
 
 If you prefer manual control:
 
