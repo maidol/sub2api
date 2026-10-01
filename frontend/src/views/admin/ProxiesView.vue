@@ -1159,9 +1159,10 @@ const allProxiesForBackup = ref<Proxy[]>([])
 const loadBackupProxyOptions = async () => {
   allProxiesForBackup.value = await adminAPI.proxies.getAllWithCount()
 }
+// Pool-managed proxies are leased for one account each, never a backup.
 const backupProxyOptions = (excludeId?: number) =>
   allProxiesForBackup.value
-    .filter(p => p.id !== excludeId)
+    .filter(p => p.id !== excludeId && !p.managed)
     .map(p => ({ label: `${p.name} (${p.host}:${p.port})`, value: p.id }))
 
 let abortController: AbortController | null = null

@@ -198,7 +198,9 @@ func (s *ProxyPoolService) call(ctx context.Context, method, path string, body a
 		}
 		rd = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, rd)
+	// baseURL is the provider URL an admin configured; UpdateConfig accepts
+	// http(s) only. Reaching an admin-chosen host is the point of this call.
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, rd) //nolint:gosec // G704: admin-configured provider URL, see above
 	if err != nil {
 		return 0, "", ErrProxyPoolUnavailable
 	}
@@ -206,10 +208,15 @@ func (s *ProxyPoolService) call(ctx context.Context, method, path string, body a
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := s.client.Do(req)
+	resp, err := s.client.Do(req) //nolint:gosec // G704: admin-configured provider URL, see above
 	if err != nil {
-		// The error text carries the URL only, never the token.
-		log.Printf("[ProxyPool] %s %s: %v", method, path, err)
+		// A *url.Error repeats the URL, whose path may hold a lease ID; log
+		// only the cause.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		log.Printf("[ProxyPool] %s %s: %v", method, proxyPoolLogPath(path), err)
 		return 0, "", ErrProxyPoolUnavailable
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -223,11 +230,25 @@ func (s *ProxyPoolService) call(ctx context.Context, method, path string, body a
 	}
 	if out != nil && len(bytes.TrimSpace(data)) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
-			log.Printf("[ProxyPool] %s %s: decode: %v", method, path, err)
+			log.Printf("[ProxyPool] %s %s: decode: %v", method, proxyPoolLogPath(path), err)
 			return resp.StatusCode, "", ErrProxyPoolUnavailable
 		}
 	}
 	return resp.StatusCode, "", nil
+}
+
+// proxyPoolLogPath hides the lease ID in a provider path: a lease ID must not
+// reach the logs.
+func proxyPoolLogPath(path string) string {
+	const prefix = "/v1/leases/"
+	if !strings.HasPrefix(path, prefix) {
+		return path
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	if i := strings.Index(rest, "/"); i >= 0 {
+		return prefix + "{id}" + rest[i:]
+	}
+	return prefix + "{id}"
 }
 
 func providerError(status int, code string) error {
@@ -270,7 +291,7 @@ func (s *ProxyPoolService) Lease(ctx context.Context) (*Proxy, error) {
 	}
 	if l.LeaseID == "" || l.Host == "" || l.Port < 1 || l.Port > 65535 || l.Username == "" || l.Password == "" ||
 		(l.Protocol != "http" && l.Protocol != "socks5") {
-		log.Printf("[ProxyPool] provider returned an incomplete lease %q", l.LeaseID)
+		log.Printf("[ProxyPool] provider returned an incomplete lease")
 		s.release(ctx, l.LeaseID)
 		return nil, ErrProxyPoolUnavailable
 	}
@@ -291,7 +312,7 @@ func (s *ProxyPoolService) Lease(ctx context.Context) (*Proxy, error) {
 		s.release(ctx, l.LeaseID)
 		return nil, err
 	}
-	log.Printf("[ProxyPool] leased %s as proxy %d (%s)", l.LeaseID, proxy.ID, l.Node)
+	log.Printf("[ProxyPool] leased proxy %d (%s)", proxy.ID, l.Node)
 	return proxy, nil
 }
 
@@ -313,7 +334,7 @@ func (s *ProxyPoolService) Rotate(ctx context.Context, proxyID int64) (string, e
 	if status != http.StatusOK {
 		return "", providerError(status, code)
 	}
-	log.Printf("[ProxyPool] rotated proxy %d (%s) to %s", proxy.ID, proxy.ExternalRef, l.Node)
+	log.Printf("[ProxyPool] rotated proxy %d to %s", proxy.ID, l.Node)
 	return l.Node, nil
 }
 
@@ -331,7 +352,8 @@ func (s *ProxyPoolService) release(ctx context.Context, leaseID string) bool {
 }
 
 // Reconcile releases (1) pool-managed rows that are at least
-// proxyPoolRowGrace old and used by no account, and (2) provider leases made
+// proxyPoolRowGrace old and used by no account and no proxy as its backup,
+// and (2) provider leases made
 // by Sub2API that no pool-managed row refers to (a crash between lease and
 // row, or a row an admin deleted by hand). It returns how many rows and how
 // many orphan leases it released.
@@ -348,13 +370,21 @@ func (s *ProxyPoolService) Reconcile(ctx context.Context) (rows int, orphans int
 		return 0, 0, err
 	}
 	now := s.now()
+	// A row another proxy falls back to is in use too: deleting it would
+	// clear that backup_proxy_id (ON DELETE SET NULL) without a word.
+	backups := map[int64]bool{}
+	for i := range all {
+		if all[i].BackupProxyID != nil {
+			backups[*all[i].BackupProxyID] = true
+		}
+	}
 	refs := map[string]bool{}
 	for i := range all {
 		p := &all[i]
 		if p.ManagedBy != ProxyManagedByPool {
 			continue
 		}
-		if now.Sub(p.CreatedAt) < proxyPoolRowGrace {
+		if now.Sub(p.CreatedAt) < proxyPoolRowGrace || backups[p.ID] {
 			refs[p.ExternalRef] = true
 			continue
 		}
@@ -375,7 +405,7 @@ func (s *ProxyPoolService) Reconcile(ctx context.Context) (rows int, orphans int
 			return rows, orphans, err
 		}
 		rows++
-		log.Printf("[ProxyPool] released unused proxy %d (%s)", p.ID, p.ExternalRef)
+		log.Printf("[ProxyPool] released unused proxy %d", p.ID)
 	}
 
 	var list struct {
@@ -397,7 +427,7 @@ func (s *ProxyPoolService) Reconcile(ctx context.Context) (rows int, orphans int
 		}
 		if s.release(ctx, l.LeaseID) {
 			orphans++
-			log.Printf("[ProxyPool] released orphan lease %s", l.LeaseID)
+			log.Printf("[ProxyPool] released an orphan lease")
 		}
 	}
 	return rows, orphans, nil

@@ -38,7 +38,7 @@ func MakeSlots(count, basePort int) []Slot {
 // do not open any other slot.
 func SlotPassword(master, slot string) string {
 	mac := hmac.New(sha256.New, []byte(master))
-	mac.Write([]byte("vpngate-slot:" + slot))
+	_, _ = mac.Write([]byte("vpngate-slot:" + slot)) // hash.Hash.Write never returns an error
 	return hex.EncodeToString(mac.Sum(nil))[:32]
 }
 

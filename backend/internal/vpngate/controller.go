@@ -49,7 +49,9 @@ func (c *HTTPController) do(ctx context.Context, method, path string, body any, 
 		}
 		rd = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
+	// c.base is the external controller address, which LoadSettings only
+	// accepts on loopback; path is a constant of this package.
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd) //nolint:gosec // G704: loopback controller only, see above
 	if err != nil {
 		return err
 	}
@@ -57,7 +59,7 @@ func (c *HTTPController) do(ctx context.Context, method, path string, body any, 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) //nolint:gosec // G704: loopback controller only, see above
 	if err != nil {
 		return err
 	}
