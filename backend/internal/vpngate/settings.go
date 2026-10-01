@@ -10,25 +10,26 @@ import (
 // Settings is the sidecar configuration, read from VPNGATE_* environment
 // variables.
 type Settings struct {
-	PoolFile       string
-	WorkDir        string
-	MihomoBin      string
-	ControllerAddr string
-	APIListen      string
-	APIToken       string
-	PublicHost     string
-	Slots          int
-	BasePort       int
-	ListenAddr     string
-	MasterSecret   string
-	DNS            []string
-	ProbeURL       string
-	ProbeTimeout   time.Duration
-	ProbeInterval  time.Duration
-	FailThreshold  int
-	Cooldown       time.Duration
-	MaxAttempts    int
-	MaxNodes       int
+	PoolFile         string
+	WorkDir          string
+	MihomoBin        string
+	ControllerAddr   string
+	APIListen        string
+	APIToken         string
+	PublicHost       string
+	Slots            int
+	BasePort         int
+	ListenAddr       string
+	MasterSecret     string
+	DNS              []string
+	ProbeURL         string
+	ProbeTimeout     time.Duration
+	ProbeInterval    time.Duration
+	PoolPollInterval time.Duration
+	FailThreshold    int
+	Cooldown         time.Duration
+	MaxAttempts      int
+	MaxNodes         int
 }
 
 // LoadSettings reads settings through getenv (os.Getenv in production).
@@ -60,24 +61,25 @@ func LoadSettings(getenv func(string) string) (Settings, error) {
 	}
 
 	s := Settings{
-		PoolFile:       str("VPNGATE_POOL_FILE", "/data/pool/mihomo-openvpn.yaml"),
-		WorkDir:        str("VPNGATE_WORK_DIR", "/data/state"),
-		MihomoBin:      str("MIHOMO_BIN", "/usr/local/bin/mihomo"),
-		ControllerAddr: str("VPNGATE_CONTROLLER_ADDR", "127.0.0.1:19090"),
-		APIListen:      str("VPNGATE_API_LISTEN", "0.0.0.0:20000"),
-		APIToken:       getenv("VPNGATE_API_TOKEN"),
-		PublicHost:     str("VPNGATE_PUBLIC_HOST", "vpngate"),
-		Slots:          num("VPNGATE_SLOTS", 10, 1, 200),
-		BasePort:       num("VPNGATE_BASE_PORT", 20001, 1024, 65000),
-		ListenAddr:     str("VPNGATE_LISTEN", "0.0.0.0"),
-		MasterSecret:   getenv("VPNGATE_MASTER_SECRET"),
-		ProbeURL:       str("VPNGATE_PROBE_URL", "https://www.gstatic.com/generate_204"),
-		ProbeTimeout:   dur("VPNGATE_PROBE_TIMEOUT", 10*time.Second),
-		ProbeInterval:  dur("VPNGATE_PROBE_INTERVAL", 60*time.Second),
-		FailThreshold:  num("VPNGATE_FAIL_THRESHOLD", 3, 1, 100),
-		Cooldown:       dur("VPNGATE_COOLDOWN", 30*time.Minute),
-		MaxAttempts:    num("VPNGATE_MAX_ATTEMPTS", 5, 1, 100),
-		MaxNodes:       num("VPNGATE_MAX_NODES", 200, 1, 500),
+		PoolFile:         str("VPNGATE_POOL_FILE", "/data/pool/mihomo-openvpn.yaml"),
+		WorkDir:          str("VPNGATE_WORK_DIR", "/data/state"),
+		MihomoBin:        str("MIHOMO_BIN", "/usr/local/bin/mihomo"),
+		ControllerAddr:   str("VPNGATE_CONTROLLER_ADDR", "127.0.0.1:19090"),
+		APIListen:        str("VPNGATE_API_LISTEN", "0.0.0.0:20000"),
+		APIToken:         getenv("VPNGATE_API_TOKEN"),
+		PublicHost:       str("VPNGATE_PUBLIC_HOST", "vpngate"),
+		Slots:            num("VPNGATE_SLOTS", 10, 1, 200),
+		BasePort:         num("VPNGATE_BASE_PORT", 20001, 1024, 65000),
+		ListenAddr:       str("VPNGATE_LISTEN", "0.0.0.0"),
+		MasterSecret:     getenv("VPNGATE_MASTER_SECRET"),
+		ProbeURL:         str("VPNGATE_PROBE_URL", "https://www.gstatic.com/generate_204"),
+		ProbeTimeout:     dur("VPNGATE_PROBE_TIMEOUT", 10*time.Second),
+		ProbeInterval:    dur("VPNGATE_PROBE_INTERVAL", 60*time.Second),
+		PoolPollInterval: dur("VPNGATE_POOL_POLL_INTERVAL", 60*time.Second),
+		FailThreshold:    num("VPNGATE_FAIL_THRESHOLD", 3, 1, 100),
+		Cooldown:         dur("VPNGATE_COOLDOWN", 30*time.Minute),
+		MaxAttempts:      num("VPNGATE_MAX_ATTEMPTS", 5, 1, 100),
+		MaxNodes:         num("VPNGATE_MAX_NODES", 200, 1, 500),
 	}
 	for _, d := range strings.Split(str("VPNGATE_DNS", "1.1.1.1,8.8.8.8"), ",") {
 		if d = strings.TrimSpace(d); d != "" {

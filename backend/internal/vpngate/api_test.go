@@ -20,6 +20,7 @@ const testMaster = "m4ster-secret-0123"
 
 type apiFixture struct {
 	srv   *httptest.Server
+	api   *API
 	fake  *fakeController
 	store *LeaseStore
 	path  string
@@ -45,7 +46,7 @@ func newAPIFixture(t *testing.T, down ...string) *apiFixture {
 	api := &API{Token: testToken, PublicHost: "vpngate", Master: testMaster, Store: store, Mgr: mgr, NodeCount: len(nodes)}
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
-	return &apiFixture{srv: srv, fake: f, store: store, path: path}
+	return &apiFixture{srv: srv, api: api, fake: f, store: store, path: path}
 }
 
 func (fx *apiFixture) do(t *testing.T, method, path, body string) (int, map[string]any) {
@@ -226,5 +227,53 @@ func TestAPIRejectsBadLeaseRequests(t *testing.T) {
 	}
 	if got := fx.store.List(); len(got) != 0 {
 		t.Fatalf("bad requests must not lease anything: %+v", got)
+	}
+}
+
+func TestAPIPauseHoldsLeasesUntilResumed(t *testing.T) {
+	fx := newAPIFixture(t)
+	resume := fx.api.Pause()
+	got := make(chan int, 1)
+	go func() {
+		req, _ := http.NewRequest(http.MethodPost, fx.srv.URL+"/v1/leases", strings.NewReader(`{"client_ref":"paused"}`))
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			got <- -1
+			return
+		}
+		_ = resp.Body.Close()
+		got <- resp.StatusCode
+	}()
+	select {
+	case code := <-got:
+		t.Fatalf("lease answered %d while the API was paused", code)
+	case <-time.After(150 * time.Millisecond):
+	}
+	resume()
+	select {
+	case code := <-got:
+		if code != http.StatusOK {
+			t.Fatalf("lease after resume = %d, want 200", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("lease did not complete after resume")
+	}
+}
+
+func TestAPIHealthzReportsThePoolWhenKnown(t *testing.T) {
+	fx := newAPIFixture(t)
+	loaded := time.Date(2026, 10, 1, 4, 0, 5, 0, time.UTC)
+	fx.api.Pool = func() PoolStatus {
+		return PoolStatus{LoadedAt: loaded, SHA256: "0123456789abcdef0123", Candidates: 97, Retained: 1}
+	}
+	_, health := fx.do(t, http.MethodGet, "/healthz", ``)
+	want := map[string]any{
+		"status": "ok", "nodes": float64(97), "slots": float64(2), "leased": float64(0),
+		"candidates": float64(97), "retained": float64(1),
+		"pool_sha256": "0123456789ab", "pool_loaded_at": "2026-10-01T04:00:05Z",
+	}
+	if !reflect.DeepEqual(health, want) {
+		t.Fatalf("healthz = %v, want %v", health, want)
 	}
 }

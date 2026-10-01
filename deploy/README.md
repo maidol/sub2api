@@ -95,9 +95,12 @@ images before downtime, applies migrations through the normal application
 startup, and rolls back the application if post-stop checks fail.
 
 The production installation must already use `docker-compose.local.yml` with
-`data/`, `postgres_data/`, and `redis_data/` beside the Compose file. The pool
-file is ignored by Git and must be supplied separately. The remote host needs
-Docker Compose v2, `jq`, `sha256sum`, and an SSH account allowed to run Docker.
+`data/`, `postgres_data/`, and `redis_data/` beside the Compose file. The
+VPN Gate node pool lives in the `vpngate_pool` volume and is fetched by the
+`vpngate-refresh` service (see `VPNGATE.md`); `--pool-file` is optional and
+only seeds that volume. The remote host needs Docker Compose v2, `jq`,
+`sha256sum`, outbound access to www.vpngate.net, and an SSH account allowed
+to run Docker.
 
 Before running this candidate, add stable values for these variables to the
 remote `deploy/.env` and keep them unchanged across restarts:
@@ -115,11 +118,13 @@ Run from a clean local worktree:
 ./deploy/upgrade-production-over-ssh.sh \
   --host deploy-prod \
   --install-dir /home/ubuntu/data/sub2api \
-  --commit 14dbe8219e8369ff5377c1ffef16443d8908f3d2 \
-  --pool-file /secure/path/mihomo-openvpn.yaml
+  --commit 14dbe8219e8369ff5377c1ffef16443d8908f3d2
 ```
 
-Use `--dry-run` to validate the local commit, tree, and pool file without SSH,
+Add `--pool-file /secure/path/mihomo-openvpn.yaml` to seed the node pool
+instead of waiting for the first fetch (useful when www.vpngate.net is
+unreachable from the server). Use `--dry-run` to validate the local commit,
+tree, and pool file without SSH,
 SCP, Docker, or remote changes. The script never executes `docker compose down
 -v`, never deletes the three data directories, and never regenerates existing
 PostgreSQL, JWT, or TOTP secrets. It retains a timestamped PostgreSQL dump and

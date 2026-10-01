@@ -1,7 +1,8 @@
 // Command vpngate is the VPN Gate sidecar: it renders a Mihomo config with one
 // authenticated http/socks5 listener per slot, runs Mihomo as a child process,
-// hands slots out as leases over an HTTP API, and keeps every leased slot on a
-// healthy, randomly chosen VPN Gate node.
+// hands slots out as leases over an HTTP API, keeps every leased slot on a
+// healthy, randomly chosen VPN Gate node, and applies a changed node pool by
+// restarting Mihomo without dropping leases.
 package main
 
 import (
@@ -13,7 +14,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -34,7 +34,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	data, err := readBounded(settings.PoolFile, vpngate.MaxPoolBytes)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := vpngate.WaitForPool(ctx, settings.PoolFile, 5*time.Second, log.Printf); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return fmt.Errorf("wait for pool file: %w", err)
+	}
+	data, err := vpngate.ReadPoolFile(settings.PoolFile)
 	if err != nil {
 		return fmt.Errorf("read pool file: %w", err)
 	}
@@ -45,6 +54,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	sum := vpngate.PoolSum(data)
 	slots := vpngate.MakeSlots(settings.Slots, settings.BasePort)
 
 	secretBytes := make([]byte, 24)
@@ -52,46 +62,37 @@ func run() error {
 		return err
 	}
 	secret := hex.EncodeToString(secretBytes)
-	config, err := vpngate.RenderConfig(nodes, slots, vpngate.RenderOptions{
+	if err := os.MkdirAll(settings.WorkDir, 0o700); err != nil {
+		return err
+	}
+
+	ctrl := vpngate.NewHTTPController(settings.ControllerAddr, secret)
+	renderOpts := vpngate.RenderOptions{
 		ListenAddr:     settings.ListenAddr,
 		MasterSecret:   settings.MasterSecret,
 		ControllerAddr: settings.ControllerAddr,
 		Secret:         secret,
 		DNS:            settings.DNS,
+	}
+	rt := vpngate.NewRuntime(vpngate.RuntimeOptions{
+		Launch:     vpngate.ExecLauncher(settings.MihomoBin, settings.WorkDir, os.Stdout, os.Stderr),
+		Ctrl:       ctrl,
+		Slots:      slots,
+		ConfigPath: filepath.Join(settings.WorkDir, "config.yaml"),
+		Render: func(p vpngate.ReloadPlan) ([]byte, error) {
+			opts := renderOpts
+			opts.Extras = p.Extras
+			return vpngate.RenderConfig(p.Candidates, slots, opts)
+		},
+		Logf: log.Printf,
 	})
-	if err != nil {
+	if err := rt.Start(ctx, nodes, sum); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(settings.WorkDir, 0o700); err != nil {
-		return err
-	}
-	configPath := filepath.Join(settings.WorkDir, "config.yaml")
-	if err := os.WriteFile(configPath, config, 0o600); err != nil {
-		return err
-	}
+	defer rt.Stop()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	// -d keeps cache.db (the per-group selection) in the state volume, so a
-	// restart resumes each slot on the node it had.
-	cmd := exec.Command(settings.MihomoBin, "-d", settings.WorkDir, "-f", configPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start mihomo: %w", err)
-	}
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-
-	ctrl := vpngate.NewHTTPController(settings.ControllerAddr, secret)
-	if err := waitReady(ctx, ctrl, slots[0].Group(), exited, 30*time.Second); err != nil {
-		_ = cmd.Process.Kill()
-		return err
-	}
 	store, dropped, err := vpngate.OpenLeaseStore(filepath.Join(settings.WorkDir, "leases.json"), slots)
 	if err != nil {
-		_ = cmd.Process.Kill()
 		return err
 	}
 	for _, l := range dropped {
@@ -121,68 +122,55 @@ func run() error {
 		Store:      store,
 		Mgr:        mgr,
 		NodeCount:  len(nodes),
+		Pool:       rt.Status,
 		Logf:       log.Printf,
 	}
 	srv := &http.Server{Addr: settings.APIListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	apiErr := make(chan error, 1)
 	go func() { apiErr <- srv.ListenAndServe() }()
 
+	watcher := &vpngate.PoolWatcher{
+		Path:     settings.PoolFile,
+		MaxNodes: settings.MaxNodes,
+		Interval: settings.PoolPollInterval,
+		Logf:     log.Printf,
+		// Lease, rotate, release and health checks wait while Mihomo restarts.
+		// Lock order is API then manager, the order the lease handlers use.
+		Apply: func(ctx context.Context, next []vpngate.Node, sum string) error {
+			resumeAPI := api.Pause()
+			defer resumeAPI()
+			resumeMgr := mgr.Pause()
+			res, err := rt.Reload(ctx, next, sum, store.ActiveSlots())
+			if err != nil {
+				resumeMgr(nil)
+				return err
+			}
+			resumeMgr(res.Candidates)
+			log.Printf("vpngate: pool %s applied: %d nodes (+%d -%d), %d kept for leased slots",
+				sum[:12], len(res.Candidates), res.Added, res.Removed, res.Retained)
+			return nil
+		},
+	}
+	watcher.SetApplied(sum)
+	watchErr := make(chan error, 1)
+	go func() { watchErr <- watcher.Run(mgrCtx) }()
+
 	select {
-	case err := <-exited:
+	case err := <-rt.Crashed():
 		_ = srv.Close()
 		return fmt.Errorf("mihomo exited: %v", err)
+	case err := <-watchErr:
+		_ = srv.Close()
+		if err == nil {
+			return nil
+		}
+		return fmt.Errorf("pool reload: %w", err)
 	case err := <-apiErr:
-		cancelMgr()
-		_ = cmd.Process.Kill()
-		<-exited
 		return fmt.Errorf("lease API: %v", err)
 	case <-ctx.Done():
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = srv.Shutdown(shutdownCtx)
 		cancelShutdown()
-		cancelMgr()
-		_ = cmd.Process.Signal(syscall.SIGTERM)
-		select {
-		case <-exited:
-		case <-time.After(10 * time.Second):
-			_ = cmd.Process.Kill()
-			<-exited
-		}
 		return nil
 	}
-}
-
-// waitReady waits until the controller serves our own first group. Reading a
-// group only this config defines (rather than GET /version) proves we reached
-// the Mihomo we started, not another one already bound to the address.
-func waitReady(ctx context.Context, ctrl *vpngate.HTTPController, group string, exited <-chan error, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		select {
-		case err := <-exited:
-			return fmt.Errorf("mihomo exited during startup: %v", err)
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		reqCtx, cancel := context.WithTimeout(ctx, time.Second)
-		_, err := ctrl.Current(reqCtx, group)
-		cancel()
-		if err == nil {
-			return nil
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return errors.New("mihomo controller did not become ready")
-}
-
-func readBounded(path string, limit int) ([]byte, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Size() > int64(limit) {
-		return nil, fmt.Errorf("%s is larger than %d bytes", path, limit)
-	}
-	return os.ReadFile(path)
 }

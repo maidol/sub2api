@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -52,6 +53,10 @@ type RenderOptions struct {
 	// Shuffle reorders a group's node list; nil means crypto-random. The first
 	// entry is the group's initial selection on a fresh state directory.
 	Shuffle func([]string)
+	// Extras lists, per slot name, nodes only that slot's group contains: the
+	// node a leased slot is on after it left the VPN Gate list. No other group
+	// lists them, so no other lease can be moved onto them.
+	Extras map[string][]Node
 }
 
 // RenderConfig builds the Mihomo YAML. There is deliberately no DIRECT
@@ -79,15 +84,11 @@ func RenderConfig(nodes []Node, slots []Slot, opts RenderOptions) ([]byte, error
 
 	proxies := make([]map[string]any, 0, len(nodes))
 	names := make([]string, 0, len(nodes))
+	defined := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
-		cfg := make(map[string]any, len(n.Config)+2)
-		for k, v := range n.Config {
-			cfg[k] = v
-		}
-		cfg["remote-dns-resolve"] = true
-		cfg["dns"] = append([]string(nil), opts.DNS...)
-		proxies = append(proxies, cfg)
+		proxies = append(proxies, proxyConfig(n, opts.DNS))
 		names = append(names, n.Name)
+		defined[n.Name] = true
 	}
 
 	groups := make([]map[string]any, 0, len(slots))
@@ -95,6 +96,16 @@ func RenderConfig(nodes []Node, slots []Slot, opts RenderOptions) ([]byte, error
 	for _, s := range slots {
 		order := append([]string(nil), names...)
 		shuffle(order)
+		for _, n := range opts.Extras[s.Name] {
+			if slices.Contains(names, n.Name) {
+				continue // already a candidate, already in every group
+			}
+			if !defined[n.Name] {
+				proxies = append(proxies, proxyConfig(n, opts.DNS))
+				defined[n.Name] = true
+			}
+			order = append(order, n.Name)
+		}
 		groups = append(groups, map[string]any{
 			"name":    s.Group(),
 			"type":    "select",
@@ -123,6 +134,17 @@ func RenderConfig(nodes []Node, slots []Slot, opts RenderOptions) ([]byte, error
 		"rules":               []string{"MATCH,REJECT"},
 	}
 	return yaml.Marshal(doc)
+}
+
+// proxyConfig copies a node's config and makes the tunnel resolve DNS.
+func proxyConfig(n Node, dns []string) map[string]any {
+	cfg := make(map[string]any, len(n.Config)+2)
+	for k, v := range n.Config {
+		cfg[k] = v
+	}
+	cfg["remote-dns-resolve"] = true
+	cfg["dns"] = append([]string(nil), dns...)
+	return cfg
 }
 
 // CryptoShuffle is a Fisher-Yates shuffle driven by crypto/rand.

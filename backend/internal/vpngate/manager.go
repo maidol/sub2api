@@ -80,6 +80,27 @@ func (m *Manager) active() []Slot {
 	return m.opts.Active()
 }
 
+// Pause blocks Tick, Reselect, PinCurrent and CurrentNode until resume is
+// called. resume replaces the candidate nodes when nodes is non-nil. Failure
+// counts and cooldowns are kept, so a node that just failed is not handed out
+// again because the pool was reloaded.
+func (m *Manager) Pause() (resume func(nodes []Node)) {
+	m.mu.Lock()
+	var once sync.Once
+	return func(nodes []Node) {
+		once.Do(func() {
+			if nodes != nil {
+				names := make([]string, 0, len(nodes))
+				for _, n := range nodes {
+					names = append(names, n.Name)
+				}
+				m.nodes = names
+			}
+			m.mu.Unlock()
+		})
+	}
+}
+
 // Run pins every slot's starting node, calls Tick immediately and then every
 // interval until ctx is done.
 func (m *Manager) Run(ctx context.Context, interval time.Duration) {

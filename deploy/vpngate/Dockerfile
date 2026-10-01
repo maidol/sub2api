@@ -49,7 +49,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -g 1000 vpngate && \
     adduser -u 1000 -G vpngate -s /sbin/nologin -D vpngate && \
     mkdir -p /data/pool /data/state && \
-    chown vpngate:vpngate /data/state && \
+    chown vpngate:vpngate /data/pool /data/state && \
     chmod 0700 /data/state
 COPY --from=mihomo /usr/local/bin/mihomo /usr/local/bin/mihomo
 COPY --from=builder /out/vpngate /usr/local/bin/vpngate

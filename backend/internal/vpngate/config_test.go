@@ -183,3 +183,45 @@ func TestSlotPasswordIsPerSlotAndStable(t *testing.T) {
 		t.Fatal("the master secret must not appear in a slot password")
 	}
 }
+
+func TestRenderConfigGivesARetainedNodeOnlyToItsSlot(t *testing.T) {
+	slots := MakeSlots(2, 20001)
+	opts := testRenderOptions()
+	opts.Extras = map[string][]Node{"slot01": testNodes("OLD")}
+	cfg, raw := render(t, testNodes("A", "B"), slots, opts)
+
+	if strings.Contains(raw, "DIRECT") {
+		t.Fatalf("rendered config must never mention DIRECT:\n%s", raw)
+	}
+	var names []string
+	for _, p := range cfg.Proxies {
+		names = append(names, p["name"].(string))
+		if p["remote-dns-resolve"] != true || !reflect.DeepEqual(p["dns"], []any{"1.1.1.1"}) {
+			t.Fatalf("proxy %v must resolve DNS inside the tunnel like every node", p["name"])
+		}
+	}
+	sort.Strings(names)
+	if !reflect.DeepEqual(names, []string{"A", "B", "OLD"}) {
+		t.Fatalf("proxies = %v, want A, B and the retained OLD once", names)
+	}
+	if got := cfg.Groups[0].Proxies; !reflect.DeepEqual(got, []string{"A", "B", "OLD"}) {
+		t.Fatalf("slot01 group = %v, want the candidates followed by its retained node", got)
+	}
+	if got := cfg.Groups[1].Proxies; !reflect.DeepEqual(got, []string{"A", "B"}) {
+		t.Fatalf("slot02 group = %v, must not offer slot01's retained node", got)
+	}
+}
+
+func TestRenderConfigIgnoresAnExtraThatIsAlsoACandidate(t *testing.T) {
+	slots := MakeSlots(2, 20001)
+	opts := testRenderOptions()
+	opts.Extras = map[string][]Node{"slot01": testNodes("A")}
+	cfg, _ := render(t, testNodes("A", "B"), slots, opts)
+
+	if len(cfg.Proxies) != 2 {
+		t.Fatalf("proxies = %v, want A and B once each", cfg.Proxies)
+	}
+	if got := cfg.Groups[0].Proxies; !reflect.DeepEqual(got, []string{"A", "B"}) {
+		t.Fatalf("slot01 group = %v, want A and B without a duplicate", got)
+	}
+}

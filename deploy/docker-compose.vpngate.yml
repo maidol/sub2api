@@ -1,7 +1,7 @@
 # =============================================================================
 # VPN Gate sidecar (optional). Use together with docker-compose.yml:
 #   docker compose -f docker-compose.yml -f docker-compose.vpngate.yml up -d
-# See VPNGATE.md for the pool file and for Sub2API's proxy pool mode.
+# See VPNGATE.md for the node pool refresh and Sub2API's proxy pool mode.
 # =============================================================================
 
 services:
@@ -31,14 +31,44 @@ services:
       - VPNGATE_FAIL_THRESHOLD=${VPNGATE_FAIL_THRESHOLD:-3}
       - VPNGATE_COOLDOWN=${VPNGATE_COOLDOWN:-30m}
       - VPNGATE_DNS=${VPNGATE_DNS:-1.1.1.1,8.8.8.8}
+      - VPNGATE_POOL_POLL_INTERVAL=${VPNGATE_POOL_POLL_INTERVAL:-60s}
     volumes:
-      - ./vpngate/pool:/data/pool:ro
+      - vpngate_pool:/data/pool:ro
       - vpngate_state:/data/state
     # No ports: published. Only containers on sub2api-network reach the lease
     # API (port 20000) and the slots (20001..).
     networks:
       - sub2api-network
 
+  # Fetches the VPN Gate list daily and replaces the pool file when the
+  # result is good; the sidecar applies a changed file by itself.
+  vpngate-refresh:
+    build:
+      context: ..
+      dockerfile: deploy/vpngate/refresher/Dockerfile
+    image: sub2api-vpngate-refresh:local
+    container_name: sub2api-vpngate-refresh
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      - VPNGATE_REFRESH_TIME=${VPNGATE_REFRESH_TIME:-04:00}
+      - VPNGATE_REFRESH_TIMEZONE=${VPNGATE_REFRESH_TIMEZONE:-Asia/Shanghai}
+      - VPNGATE_REFRESH_MIN_NODES=${VPNGATE_REFRESH_MIN_NODES:-20}
+      - VPNGATE_REFRESH_RETRIES=${VPNGATE_REFRESH_RETRIES:-3}
+      - VPNGATE_REFRESH_TIMEOUT=${VPNGATE_REFRESH_TIMEOUT:-60s}
+    volumes:
+      - vpngate_pool:/data/pool
+    # Needs outbound access to www.vpngate.net only; it talks to no other
+    # service, so it is not on sub2api-network.
+
 volumes:
+  vpngate_pool:
+    driver: local
   vpngate_state:
     driver: local

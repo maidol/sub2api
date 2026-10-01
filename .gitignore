@@ -119,6 +119,10 @@ backend/.installed
 tests
 !deploy/tests/
 !deploy/tests/**
+!deploy/vpngate/refresher/tests/
+!deploy/vpngate/refresher/tests/**
+!deploy/vpngate/refresher/third_party/tests/
+!deploy/vpngate/refresher/third_party/tests/**
 CLAUDE.md
 .claude
 scripts

@@ -30,7 +30,10 @@ type API struct {
 	Store      *LeaseStore
 	Mgr        *Manager
 	NodeCount  int
-	Logf       func(format string, args ...any)
+	// Pool, when set, reports the pool the running config was built from;
+	// /healthz then reports its candidates as "nodes".
+	Pool func() PoolStatus
+	Logf func(format string, args ...any)
 
 	mu sync.Mutex // serialises lease, rotate and release
 }
@@ -46,6 +49,28 @@ type LeaseView struct {
 	Password  string    `json:"password,omitempty"`
 	Node      string    `json:"node"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// PoolStatus describes the node pool the running Mihomo config was built from.
+type PoolStatus struct {
+	LoadedAt   time.Time
+	SHA256     string
+	Candidates int
+	Retained   int
+}
+
+// shortSum shortens a sha256 hex digest for logs and /healthz.
+func shortSum(sum string) string {
+	if len(sum) > 12 {
+		return sum[:12]
+	}
+	return sum
+}
+
+// Pause blocks lease, rotate and release until resume is called.
+func (a *API) Pause() (resume func()) {
+	a.mu.Lock()
+	return sync.OnceFunc(a.mu.Unlock)
 }
 
 const apiTimeout = 2 * time.Minute
@@ -200,12 +225,21 @@ func (a *API) listLeases(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) healthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"status": "ok",
 		"nodes":  a.NodeCount,
 		"slots":  len(a.Store.slots),
 		"leased": len(a.Store.List()),
-	})
+	}
+	if a.Pool != nil {
+		st := a.Pool()
+		body["nodes"] = st.Candidates
+		body["candidates"] = st.Candidates
+		body["retained"] = st.Retained
+		body["pool_sha256"] = shortSum(st.SHA256)
+		body["pool_loaded_at"] = st.LoadedAt.UTC().Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

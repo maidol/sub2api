@@ -19,6 +19,11 @@ sidecar, that egresses through a VPN Gate OpenVPN node.
   by any other lease. A node that recovers later does **not** pull the slot
   back. "Rotate" (the *change proxy* button in Sub2API) does the same move on
   demand; the old node cools down so it is not handed to the next lease.
+- The node pool refreshes itself once a day (see below). Applying a new pool
+  restarts Mihomo: connections in flight through the slots drop, leases are
+  kept, and every slot goes back to its node. A leased slot whose node left
+  the VPN Gate list keeps that node until its health checks fail; no other
+  lease is ever given it.
 - There is no DIRECT fallback anywhere. If a leased slot's node is dead and no
   healthy free node exists, requests through it fail; they never leave from
   the host IP.
@@ -26,24 +31,39 @@ sidecar, that egresses through a VPN Gate OpenVPN node.
   `/data/state/cache.db`).
 - Target hostnames are resolved inside the tunnel (`VPNGATE_DNS`), not by the
   host resolver.
-- No TUN device, no `NET_ADMIN`, no root: the compose service runs with
+- No TUN device, no `NET_ADMIN`, no root: both services run with
   `cap_drop: ALL` and a read-only root filesystem.
 
 ## 1. Node pool
 
-The sidecar does not download VPN Gate itself. It reads a Mihomo YAML file of
-`type: openvpn` proxies, the format produced by any-auto-register's exporter:
+The pool is `mihomo-openvpn.yaml` in the `vpngate_pool` volume. The
+`vpngate-refresh` service maintains it:
 
-```bash
-# in the any-auto-register checkout
-python tools/vpngate_openvpn_export.py   # writes mihomo-openvpn.yaml
-```
+- On its first start, if the volume holds no pool, it fetches one right away
+  and keeps retrying hourly until it has one. Until then the sidecar logs
+  `waiting for the pool file` and does not start.
+- Every day at `VPNGATE_REFRESH_TIME` (`VPNGATE_REFRESH_TIMEZONE`) it fetches
+  `https://www.vpngate.net/api/iphone/`, converts it with the exporter vendored
+  from any-auto-register, and replaces the pool only when the result has at
+  least `VPNGATE_REFRESH_MIN_NODES` OpenVPN nodes. Otherwise the pool in use
+  stays, and it retries hourly up to `VPNGATE_REFRESH_RETRIES` times that day.
+- Each attempt is recorded in `refresh-status.json` next to the pool:
 
-Copy the result to `deploy/vpngate/pool/mihomo-openvpn.yaml`. Entries that are
-not `type: openvpn`, lack `ca`, carry unknown fields (for example
-`dialer-proxy`) or repeat a name are skipped and logged; the rest are used. To
-refresh the pool, replace the file and restart the sidecar. Restarting drops
-in-flight connections through the slots; leases are kept.
+      docker compose -f docker-compose.yml -f docker-compose.vpngate.yml \
+        exec vpngate-refresh cat /data/pool/refresh-status.json
+
+The sidecar checks the file every `VPNGATE_POOL_POLL_INTERVAL` and applies a
+changed one. Entries that are not `type: openvpn`, lack `ca`, carry unknown
+fields (for example `dialer-proxy`) or repeat a name are skipped and logged; a
+file with no usable entry is rejected and the running pool stays.
+
+To put a pool in place by hand (for example on a host that cannot reach
+www.vpngate.net), copy it into the volume through the refresher container:
+
+    docker compose -f docker-compose.yml -f docker-compose.vpngate.yml \
+      cp ./mihomo-openvpn.yaml vpngate-refresh:/data/pool/mihomo-openvpn.yaml
+
+The next scheduled refresh replaces it again if www.vpngate.net is reachable.
 
 ## 2. Start
 
@@ -51,8 +71,8 @@ in-flight connections through the slots; leases are kept.
 cd deploy
 echo "VPNGATE_MASTER_SECRET=$(openssl rand -hex 24)" >> .env
 echo "VPNGATE_API_TOKEN=$(openssl rand -hex 24)" >> .env
-docker compose -f docker-compose.yml -f docker-compose.vpngate.yml up -d --build vpngate
-docker compose -f docker-compose.yml -f docker-compose.vpngate.yml logs -f vpngate
+docker compose -f docker-compose.yml -f docker-compose.vpngate.yml up -d --build vpngate vpngate-refresh
+docker compose -f docker-compose.yml -f docker-compose.vpngate.yml logs -f vpngate vpngate-refresh
 ```
 
 `VPNGATE_MASTER_SECRET` derives every slot's password. **Changing it
@@ -61,7 +81,8 @@ stored stop authenticating); keep it stable.
 
 The log line `vpngate: N nodes, M slots on 0.0.0.0 ports 20001-…, K leased;
 lease API on 0.0.0.0:20000` means it is up. Lines `slotNN: switched "A" -> "B"`
-record every node change.
+record every node change, and `pool … applied: N nodes (+a -r), k kept for
+leased slots` every pool change.
 
 ## 3. Connect Sub2API
 
@@ -88,12 +109,17 @@ Every request needs `Authorization: Bearer <VPNGATE_API_TOKEN>`.
 | `POST /v1/leases/{id}/rotate` | `200` lease on a new node; `503 no_healthy_node` keeps the old node; `404` unknown lease |
 | `DELETE /v1/leases/{id}` | `204`; `404` unknown lease |
 | `GET /v1/leases` | `{"leases":[…]}` without passwords |
-| `GET /healthz` | `{"status":"ok","nodes":N,"slots":M,"leased":K}` |
+| `GET /healthz` | `{"status":"ok","nodes":N,"slots":M,"leased":K,"candidates":N,"retained":R,"pool_sha256":"…","pool_loaded_at":"…"}` |
 
 A lease: `{"lease_id","client_ref","protocol","host","port","username","password","node","created_at"}`.
-`host` is `VPNGATE_PUBLIC_HOST`.
+`host` is `VPNGATE_PUBLIC_HOST`. In `/healthz`, `candidates` (also `nodes`) are
+the nodes of the current pool, `retained` the nodes kept for leased slots
+after they left the list, and `pool_sha256` the first 12 hex digits of the
+pool file's sha256.
 
 ## Settings
+
+Sidecar (`vpngate`):
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -112,6 +138,18 @@ A lease: `{"lease_id","client_ref","protocol","host","port","username","password
 | `VPNGATE_MAX_NODES` | `200` | nodes read from the pool file |
 | `VPNGATE_DNS` | `1.1.1.1,8.8.8.8` | nameservers used inside each tunnel |
 | `VPNGATE_CONTROLLER_ADDR` | `127.0.0.1:19090` | Mihomo controller, loopback only |
+| `VPNGATE_POOL_POLL_INTERVAL` | `60s` | how often the pool file is checked for changes |
+
+Refresher (`vpngate-refresh`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VPNGATE_REFRESH_TIME` | `04:00` | daily refresh time, `HH:MM` |
+| `VPNGATE_REFRESH_TIMEZONE` | `Asia/Shanghai` | IANA time zone; an unknown one stops the service |
+| `VPNGATE_REFRESH_MIN_NODES` | `20` | OpenVPN nodes a result needs before it replaces the pool |
+| `VPNGATE_REFRESH_RETRIES` | `3` | hourly retries after a failed refresh, per day |
+| `VPNGATE_REFRESH_TIMEOUT` | `60s` | download timeout |
+| `VPNGATE_REFRESH_SOURCE` | `https://www.vpngate.net/api/iphone/` | feed URL |
 
 ## Caveats
 
@@ -120,8 +158,11 @@ A lease: `{"lease_id","client_ref","protocol","host","port","username","password
   Different nodes can share an exit /24 (`public-vpn-*` servers NAT to
   neighbouring addresses), so separate leases do not guarantee separate
   networks.
-- A lease request or rotate probes candidates first and can take up to about
-  a minute.
+- The feed's size varies (97–100 servers in testing) and many listed servers
+  are dead; a new pool is not health-checked before it is applied, so a lease
+  request or rotate can take up to about a minute while candidates are probed.
+- Hosts that cannot reach www.vpngate.net never refresh; `refresh-status.json`
+  shows the failures and the pool in use stays.
 - Long streaming responses through a node have not been load-tested.
 - Networks that interfere with OpenVPN (connection resets during the handshake)
   make every probe fail; the sidecar then logs failures and never falls back to

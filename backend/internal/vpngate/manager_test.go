@@ -268,3 +268,53 @@ func TestManagerReselectReportsNoHealthyNode(t *testing.T) {
 		t.Fatalf("selection must not change, selects = %v", f.selects)
 	}
 }
+
+func TestManagerPauseSwapsCandidatesAndKeepsCooldown(t *testing.T) {
+	ctx := context.Background()
+	clock := &testClock{t: time.Date(2026, 10, 1, 4, 0, 0, 0, time.UTC)}
+	f := newFake([]string{"A", "B", "C", "N"}, map[string]string{"sub2api-slot01": "A", "sub2api-slot02": "B"})
+	f.down["A"] = true
+	m := newTestManager(f, twoSlots, []string{"A", "B", "C"}, 1, clock, nil)
+
+	m.Tick(ctx) // A fails: slot01 moves to C (B belongs to slot02), A cools down
+	if f.now["sub2api-slot01"] != "C" {
+		t.Fatalf("slot01 = %q, want C", f.now["sub2api-slot01"])
+	}
+
+	f.down["A"] = false
+	resume := m.Pause()
+	resume(testNodes("A", "N")) // the new pool: C and B are no longer listed
+	f.down["C"] = true
+
+	m.Tick(ctx) // slot01's kept node C fails; A is still cooling down, so N
+	if f.now["sub2api-slot01"] != "N" {
+		t.Fatalf("slot01 = %q, want N: the cooldown on A must survive the reload", f.now["sub2api-slot01"])
+	}
+	if f.now["sub2api-slot02"] != "B" {
+		t.Fatalf("slot02 = %q, want B: a healthy kept node stays", f.now["sub2api-slot02"])
+	}
+}
+
+func TestManagerPauseBlocksTicksUntilResumed(t *testing.T) {
+	clock := &testClock{t: time.Date(2026, 10, 1, 4, 0, 0, 0, time.UTC)}
+	f := newFake([]string{"A", "B"}, map[string]string{"sub2api-slot01": "A", "sub2api-slot02": "B"})
+	m := newTestManager(f, twoSlots, []string{"A", "B"}, 3, clock, nil)
+
+	resume := m.Pause()
+	done := make(chan struct{})
+	go func() {
+		m.Tick(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("Tick ran while the manager was paused")
+	case <-time.After(100 * time.Millisecond):
+	}
+	resume(nil)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Tick did not run after resume")
+	}
+}

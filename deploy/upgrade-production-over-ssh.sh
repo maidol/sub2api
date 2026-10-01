@@ -20,7 +20,7 @@ usage() {
 Usage:
   deploy/upgrade-production-over-ssh.sh --host deploy-prod \
     --install-dir /home/ubuntu/data/sub2api \
-    --pool-file /secure/path/mihomo-openvpn.yaml \
+    [--pool-file /secure/path/mihomo-openvpn.yaml] \
     [--commit 14dbe8219e8369ff5377c1ffef16443d8908f3d2] \
     [--project-name deploy] [--ssh-port 22] [--identity ~/.ssh/id_ed25519] \
     [--server-port 8080] [--dry-run]
@@ -50,6 +50,7 @@ remote_main() {
   local remote_tmp=$5
   local requested_project=${6:-}
   local server_port=${7:-8080}
+  local has_pool=${8:-0}
   local prod_deploy="$root/deploy"
   local env_file="$prod_deploy/.env"
   local base_compose="$prod_deploy/$BASE_COMPOSE_NAME"
@@ -77,7 +78,9 @@ remote_main() {
   [ -d "$prod_deploy/postgres_data" ] || remote_die 'production postgres_data directory is missing'
   [ -d "$prod_deploy/redis_data" ] || remote_die 'production redis_data directory is missing'
   [ -s "$remote_tmp/source.tar.gz" ] || remote_die 'uploaded source archive is missing'
-  [ -s "$remote_tmp/mihomo-openvpn.yaml" ] || remote_die 'uploaded pool file is missing'
+  if [ "$has_pool" -eq 1 ]; then
+    [ -s "$remote_tmp/mihomo-openvpn.yaml" ] || remote_die 'uploaded pool file is missing'
+  fi
 
   command -v docker >/dev/null 2>&1 || remote_die 'remote docker is required'
   docker compose version >/dev/null 2>&1 || remote_die 'remote docker compose v2 is required'
@@ -155,17 +158,14 @@ remote_main() {
 
   test "$(sha256sum "$remote_tmp/source.tar.gz" | awk '{print $1}')" = "$archive_sha" \
     || remote_die 'source archive checksum mismatch'
-  test "$(sha256sum "$remote_tmp/mihomo-openvpn.yaml" | awk '{print $1}')" = "$pool_sha" \
-    || remote_die 'VPN Gate pool checksum mismatch'
+  if [ "$has_pool" -eq 1 ]; then
+    test "$(sha256sum "$remote_tmp/mihomo-openvpn.yaml" | awk '{print $1}')" = "$pool_sha" \
+      || remote_die 'VPN Gate pool checksum mismatch'
+  fi
 
   rm -rf "$release"
   mkdir -p "$release"
   tar -xzf "$remote_tmp/source.tar.gz" -C "$release" --strip-components=1
-  mkdir -p "$release/deploy/vpngate/pool"
-  install -m 0644 "$remote_tmp/mihomo-openvpn.yaml" \
-    "$release/deploy/vpngate/pool/mihomo-openvpn.yaml"
-  [ -s "$release/deploy/vpngate/pool/mihomo-openvpn.yaml" ] \
-    || remote_die 'staged VPN Gate pool file is empty'
 
   cat > "$upgrade_compose" <<EOF
 services:
@@ -207,31 +207,59 @@ services:
       VPNGATE_MAX_NODES: "\${VPNGATE_MAX_NODES:-200}"
       VPNGATE_DNS: "\${VPNGATE_DNS:-1.1.1.1,8.8.8.8}"
       VPNGATE_CONTROLLER_ADDR: "\${VPNGATE_CONTROLLER_ADDR:-127.0.0.1:19090}"
+      VPNGATE_POOL_POLL_INTERVAL: "\${VPNGATE_POOL_POLL_INTERVAL:-60s}"
     volumes:
-      - "$release/deploy/vpngate/pool:/data/pool:ro"
+      - vpngate_pool:/data/pool:ro
       - vpngate_state:/data/state
     networks:
       - sub2api-network
 
+  vpngate-refresh:
+    image: sub2api-vpngate-refresh:source-$commit
+    build:
+      context: "$release"
+      dockerfile: deploy/vpngate/refresher/Dockerfile
+    container_name: sub2api-vpngate-refresh
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      VPNGATE_REFRESH_TIME: "\${VPNGATE_REFRESH_TIME:-04:00}"
+      VPNGATE_REFRESH_TIMEZONE: "\${VPNGATE_REFRESH_TIMEZONE:-Asia/Shanghai}"
+      VPNGATE_REFRESH_MIN_NODES: "\${VPNGATE_REFRESH_MIN_NODES:-20}"
+      VPNGATE_REFRESH_RETRIES: "\${VPNGATE_REFRESH_RETRIES:-3}"
+      VPNGATE_REFRESH_TIMEOUT: "\${VPNGATE_REFRESH_TIMEOUT:-60s}"
+    volumes:
+      - vpngate_pool:/data/pool
+
 volumes:
+  vpngate_pool:
+    driver: local
   vpngate_state:
     driver: local
 EOF
   chmod 0600 "$upgrade_compose"
 
   dc config --quiet || remote_die 'merged upgrade Compose configuration is invalid'
-  for service in sub2api postgres redis vpngate; do
+  for service in sub2api postgres redis vpngate vpngate-refresh; do
     dc config --services | grep -Fx "$service" >/dev/null \
       || remote_die "$service service missing from merged Compose"
   done
-  if dc config | awk '
-    /^  vpngate:/ { seen=1; next }
-    seen && /^  [A-Za-z0-9_-]+:/ { exit }
-    seen && /ports:/ { found=1 }
-    END { exit found ? 0 : 1 }
-  '; then
-    remote_die 'vpngate must not publish host ports'
-  fi
+  for service in vpngate vpngate-refresh; do
+    if dc config | awk -v svc="  $service:" '
+      $0 == svc { seen=1; next }
+      seen && /^  [A-Za-z0-9_-]+:/ { exit }
+      seen && /ports:/ { found=1 }
+      END { exit found ? 0 : 1 }
+    '; then
+      remote_die "$service must not publish host ports"
+    fi
+  done
 
   rollback() {
     local rollback_status=0
@@ -240,7 +268,7 @@ EOF
     [ "$rollback_done" -eq 0 ] || return 0
     rollback_done=1
     remote_log 'attempting application rollback; database will not be restored automatically'
-    dc stop sub2api vpngate >/dev/null 2>&1 || rollback_status=1
+    dc stop sub2api vpngate vpngate-refresh >/dev/null 2>&1 || rollback_status=1
     dc_base up -d --no-build sub2api >/dev/null 2>&1 || rollback_status=1
     if [ -s "$backup/old-sub2api-image-id" ]; then
       old_image=$(cat "$backup/old-sub2api-image-id")
@@ -279,6 +307,7 @@ EOF
       [ -f "$backup/old-sub2api-image-id" ] && printf 'old_image=%s\n' "$(cat "$backup/old-sub2api-image-id")"
       [ -f "$backup/new-sub2api-image-id" ] && printf 'new_image=%s\n' "$(cat "$backup/new-sub2api-image-id")"
       [ -f "$backup/new-vpngate-image-id" ] && printf 'new_vpngate_image=%s\n' "$(cat "$backup/new-vpngate-image-id")"
+      [ -f "$backup/new-vpngate-refresh-image-id" ] && printf 'new_vpngate_refresh_image=%s\n' "$(cat "$backup/new-vpngate-refresh-image-id")"
     } > "$backup/receipt.txt"
     chmod 0600 "$backup/receipt.txt"
   }
@@ -301,17 +330,28 @@ EOF
   }
   trap on_exit EXIT
 
-  remote_log 'building application and sidecar before stopping production'
-  dc build --pull --progress=plain sub2api vpngate
+  remote_log 'building application, sidecar and refresher before stopping production'
+  dc build --pull --progress=plain sub2api vpngate vpngate-refresh
   docker image inspect "sub2api:source-$commit" --format '{{.Id}}' \
     > "$backup/new-sub2api-image-id"
   docker image inspect "sub2api-vpngate:source-$commit" --format '{{.Id}}' \
     > "$backup/new-vpngate-image-id"
+  docker image inspect "sub2api-vpngate-refresh:source-$commit" --format '{{.Id}}' \
+    > "$backup/new-vpngate-refresh-image-id"
+
+  if [ "$has_pool" -eq 1 ]; then
+    remote_log 'seeding the vpngate_pool volume with the uploaded pool file'
+    chmod 0644 "$remote_tmp/mihomo-openvpn.yaml"
+    dc run --rm --no-deps -T --entrypoint sh \
+      -v "$remote_tmp/mihomo-openvpn.yaml:/seed/mihomo-openvpn.yaml:ro" \
+      vpngate-refresh -c \
+      'cp /seed/mihomo-openvpn.yaml /data/pool/.seed.tmp && mv -f /data/pool/.seed.tmp /data/pool/mihomo-openvpn.yaml'
+  fi
 
   maintenance_started=1
   remote_log 'entering maintenance window'
-  dc stop sub2api vpngate
-  dc up -d --no-build sub2api vpngate
+  dc stop sub2api vpngate vpngate-refresh
+  dc up -d --no-build sub2api vpngate vpngate-refresh
 
   container_id=$(dc ps -q sub2api)
   [ -n "$container_id" ] || remote_die 'new sub2api container was not created'
@@ -353,8 +393,16 @@ EOF
   token=$(awk -F= '$1 == "VPNGATE_API_TOKEN" { print substr($0, index($0, "=") + 1) }' "$env_file")
   client_ref="upgrade-smoke-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
-  health_json=$(dc exec -T -e VPNGATE_API_TOKEN="$token" sub2api sh -ceu \
-    'curl -fsS -H "Authorization: Bearer $VPNGATE_API_TOKEN" http://vpngate:20000/healthz')
+  # Without a seeded pool the sidecar waits for the refresher's first fetch.
+  vpngate_deadline=$((SECONDS + 300))
+  until health_json=$(dc exec -T -e VPNGATE_API_TOKEN="$token" sub2api sh -ceu \
+    'curl -fsS -H "Authorization: Bearer $VPNGATE_API_TOKEN" http://vpngate:20000/healthz' 2>/dev/null); do
+    [ "$SECONDS" -lt "$vpngate_deadline" ] || {
+      dc logs --tail=100 vpngate vpngate-refresh >&2 || true
+      remote_die 'vpngate sidecar did not become ready (no node pool yet?)'
+    }
+    sleep 5
+  done
   printf '%s\n' "$health_json" \
     | jq -e '.status == "ok" and .nodes >= 1 and .slots >= 1' >/dev/null \
     || remote_die 'sidecar health did not report a usable node and slot'
@@ -463,7 +511,6 @@ run_local() {
 
   [ -n "$host" ] || die '--host is required'
   [ -n "$install_dir" ] || die '--install-dir is required'
-  [ -n "$pool_file" ] || die '--pool-file is required'
   [ "${install_dir#/}" != "$install_dir" ] || die 'install directory must be absolute'
   case "$install_dir" in
     *[!A-Za-z0-9_./-]*) die 'install directory contains unsafe characters' ;;
@@ -476,8 +523,12 @@ run_local() {
   esac
   [ "$server_port" -ge 1 ] && [ "$server_port" -le 65535 ] \
     || die 'server port must be between 1 and 65535'
-  [ -f "$pool_file" ] || die "pool file does not exist: $pool_file"
-  [ -s "$pool_file" ] || die 'pool file is empty'
+  local has_pool=0
+  if [ -n "$pool_file" ]; then
+    [ -f "$pool_file" ] || die "pool file does not exist: $pool_file"
+    [ -s "$pool_file" ] || die 'pool file is empty'
+    has_pool=1
+  fi
   [ "$commit" = "$EXPECTED_COMMIT" ] \
     || die "only verified commit $EXPECTED_COMMIT is allowed"
 
@@ -505,7 +556,8 @@ run_local() {
   archive="$tmp_dir/sub2api-$commit.tar.gz"
   git archive --format=tar.gz --prefix="sub2api-$commit/" "$commit" > "$archive"
   archive_sha=$(sha256sum "$archive" | awk '{print $1}')
-  pool_sha=$(sha256sum "$pool_file" | awk '{print $1}')
+  pool_sha=none
+  [ "$has_pool" -eq 1 ] && pool_sha=$(sha256sum "$pool_file" | awk '{print $1}')
   log "commit=$commit tree=$EXPECTED_TREE archive_sha=$archive_sha pool_sha=$pool_sha"
 
   ssh_args=(-o BatchMode=yes -o ConnectTimeout=15 -p "$ssh_port")
@@ -521,20 +573,26 @@ run_local() {
   ssh "${ssh_args[@]}" "$host" true || die 'SSH preflight failed'
   ssh "${ssh_args[@]}" "$host" "umask 077; mkdir -p '$remote_tmp'"
   scp "${scp_args[@]}" "$archive" "$host:$remote_tmp/source.tar.gz"
-  scp "${scp_args[@]}" "$pool_file" "$host:$remote_tmp/mihomo-openvpn.yaml"
   ssh "${ssh_args[@]}" "$host" \
-    "test \"\$(sha256sum '$remote_tmp/source.tar.gz' | awk '{print \\\$1}')\" = '$archive_sha' && test \"\$(sha256sum '$remote_tmp/mihomo-openvpn.yaml' | awk '{print \\\$1}')\" = '$pool_sha'" \
-    || die 'remote upload checksum verification failed'
+    "test \"\$(sha256sum '$remote_tmp/source.tar.gz' | awk '{print \\\$1}')\" = '$archive_sha'" \
+    || die 'remote source archive checksum verification failed'
+  if [ "$has_pool" -eq 1 ]; then
+    scp "${scp_args[@]}" "$pool_file" "$host:$remote_tmp/mihomo-openvpn.yaml"
+    ssh "${ssh_args[@]}" "$host" \
+      "test \"\$(sha256sum '$remote_tmp/mihomo-openvpn.yaml' | awk '{print \\\$1}')\" = '$pool_sha'" \
+      || die 'remote pool file checksum verification failed'
+  fi
 
   log 'starting remote preflight, backup, build, migration, and smoke checks'
-  ssh "${ssh_args[@]}" "$host" bash -s -- \
-    "$install_dir" "$commit" "$archive_sha" "$pool_sha" "$remote_tmp" "$project_name" "$server_port" \
+  # The whole script is sent; --remote makes it run remote_main there.
+  ssh "${ssh_args[@]}" "$host" bash -s -- --remote \
+    "$install_dir" "$commit" "$archive_sha" "$pool_sha" "$remote_tmp" "$project_name" "$server_port" "$has_pool" \
     < "$script_path"
 }
 
 if [ "${1:-}" = '--remote' ]; then
   shift
-  [ "$#" -eq 7 ] || remote_die 'remote mode requires seven positional arguments'
+  [ "$#" -eq 8 ] || remote_die 'remote mode requires eight positional arguments'
   remote_main "$@"
   exit 0
 fi
