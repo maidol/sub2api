@@ -118,7 +118,7 @@ Run from a clean local worktree:
 ./deploy/upgrade-production-over-ssh.sh \
   --host deploy-prod \
   --install-dir /home/ubuntu/data/sub2api \
-  --commit 14dbe8219e8369ff5377c1ffef16443d8908f3d2
+  --commit 3d308dcb6564534031cd408813f36a1ecf5d1484
 ```
 
 Add `--pool-file /secure/path/mihomo-openvpn.yaml` to seed the node pool
