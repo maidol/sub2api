@@ -115,7 +115,7 @@ Run from a clean local worktree:
 ./deploy/upgrade-production-over-ssh.sh \
   --host deploy-prod \
   --install-dir /home/ubuntu/data/sub2api \
-  --commit abdba1d91aa09763770ce3515065bc5ae364e4dd \
+  --commit 14dbe8219e8369ff5377c1ffef16443d8908f3d2 \
   --pool-file /secure/path/mihomo-openvpn.yaml
 ```
 
@@ -126,9 +126,11 @@ PostgreSQL, JWT, or TOTP secrets. It retains a timestamped PostgreSQL dump and
 release directory for manual rollback. Database restoration is not automatic;
 forward migrations must be restored manually only after explicit confirmation.
 
-This commit is a controlled functional-acceptance candidate. It passed the
-proxy-pool acceptance tests, but the acceptance record has four known
-`golangci-lint` findings; complete the lint-fix plan before public release.
+This commit passed the proxy-pool acceptance tests, including the hardening
+follow-up that cleared the proxy-pool lint findings. A full-backend
+`golangci-lint` run still reports one pre-existing `errcheck` finding in
+`internal/pkg/antigravity/request_transformer_test.go`, which is outside the
+proxy-pool change.
 
 ### Method 3: Manual Deployment
 

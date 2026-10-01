@@ -48,7 +48,7 @@ printf 'not a pool\n' > "$tmp/pool.yaml"
 
 if "$script" \
   --install-dir "$tmp" \
-  --commit abdba1d91aa09763770ce3515065bc5ae364e4dd \
+  --commit 14dbe8219e8369ff5377c1ffef16443d8908f3d2 \
   --pool-file "$tmp/pool.yaml" \
   --dry-run >/dev/null 2>&1; then
   printf '%s\n' 'missing --host must fail' >&2

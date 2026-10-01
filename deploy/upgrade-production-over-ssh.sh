@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 umask 077
 
-readonly EXPECTED_COMMIT="abdba1d91aa09763770ce3515065bc5ae364e4dd"
-readonly EXPECTED_TREE="ccaabd4a6b880c2c61e8a8d8bf801d8485f12270"
+readonly EXPECTED_COMMIT="14dbe8219e8369ff5377c1ffef16443d8908f3d2"
+readonly EXPECTED_TREE="7198ad3e2c02050d37a508cfeb08d91e85d02ab5"
 readonly BASE_COMPOSE_NAME="docker-compose.local.yml"
 
 log() {
@@ -21,7 +21,7 @@ Usage:
   deploy/upgrade-production-over-ssh.sh --host deploy-prod \
     --install-dir /home/ubuntu/data/sub2api \
     --pool-file /secure/path/mihomo-openvpn.yaml \
-    [--commit abdba1d91aa09763770ce3515065bc5ae364e4dd] \
+    [--commit 14dbe8219e8369ff5377c1ffef16443d8908f3d2] \
     [--project-name deploy] [--ssh-port 22] [--identity ~/.ssh/id_ed25519] \
     [--server-port 8080] [--dry-run]
 
