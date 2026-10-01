@@ -421,10 +421,17 @@ EOF
   lease_id=
 }
 
+# cleanup_local runs from an EXIT trap after run_local has returned, so the
+# variables it reads must live at script scope, not as run_local locals.
+host=""
+dry_run=0
+tmp_dir=""
+remote_tmp=""
+ssh_args=()
+
 run_local() {
   local script_path=$1
   shift
-  local host=""
   local install_dir=""
   local commit="$EXPECTED_COMMIT"
   local pool_file=""
@@ -432,14 +439,11 @@ run_local() {
   local identity_file=""
   local project_name=""
   local server_port=8080
-  local dry_run=0
-  local tmp_dir=""
   local archive=""
   local archive_sha=""
   local pool_sha=""
-  local remote_tmp=""
   local repo_root=""
-  local -a ssh_args scp_args
+  local -a scp_args
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
