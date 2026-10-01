@@ -215,6 +215,34 @@ func (_c *ProxyCreate) SetNillableExternalRef(v *string) *ProxyCreate {
 	return _c
 }
 
+// SetPoolShareable sets the "pool_shareable" field.
+func (_c *ProxyCreate) SetPoolShareable(v bool) *ProxyCreate {
+	_c.mutation.SetPoolShareable(v)
+	return _c
+}
+
+// SetNillablePoolShareable sets the "pool_shareable" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillablePoolShareable(v *bool) *ProxyCreate {
+	if v != nil {
+		_c.SetPoolShareable(*v)
+	}
+	return _c
+}
+
+// SetPoolShareMax sets the "pool_share_max" field.
+func (_c *ProxyCreate) SetPoolShareMax(v int) *ProxyCreate {
+	_c.mutation.SetPoolShareMax(v)
+	return _c
+}
+
+// SetNillablePoolShareMax sets the "pool_share_max" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillablePoolShareMax(v *int) *ProxyCreate {
+	if v != nil {
+		_c.SetPoolShareMax(*v)
+	}
+	return _c
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *ProxyCreate) AddAccountIDs(ids ...int64) *ProxyCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -321,6 +349,14 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultExternalRef
 		_c.mutation.SetExternalRef(v)
 	}
+	if _, ok := _c.mutation.PoolShareable(); !ok {
+		v := proxy.DefaultPoolShareable
+		_c.mutation.SetPoolShareable(v)
+	}
+	if _, ok := _c.mutation.PoolShareMax(); !ok {
+		v := proxy.DefaultPoolShareMax
+		_c.mutation.SetPoolShareMax(v)
+	}
 	return nil
 }
 
@@ -403,6 +439,12 @@ func (_c *ProxyCreate) check() error {
 		if err := proxy.ExternalRefValidator(v); err != nil {
 			return &ValidationError{Name: "external_ref", err: fmt.Errorf(`ent: validator failed for field "Proxy.external_ref": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.PoolShareable(); !ok {
+		return &ValidationError{Name: "pool_shareable", err: errors.New(`ent: missing required field "Proxy.pool_shareable"`)}
+	}
+	if _, ok := _c.mutation.PoolShareMax(); !ok {
+		return &ValidationError{Name: "pool_share_max", err: errors.New(`ent: missing required field "Proxy.pool_share_max"`)}
 	}
 	return nil
 }
@@ -490,6 +532,14 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExternalRef(); ok {
 		_spec.SetField(proxy.FieldExternalRef, field.TypeString, value)
 		_node.ExternalRef = value
+	}
+	if value, ok := _c.mutation.PoolShareable(); ok {
+		_spec.SetField(proxy.FieldPoolShareable, field.TypeBool, value)
+		_node.PoolShareable = value
+	}
+	if value, ok := _c.mutation.PoolShareMax(); ok {
+		_spec.SetField(proxy.FieldPoolShareMax, field.TypeInt, value)
+		_node.PoolShareMax = value
 	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -814,6 +864,36 @@ func (u *ProxyUpsert) UpdateExternalRef() *ProxyUpsert {
 	return u
 }
 
+// SetPoolShareable sets the "pool_shareable" field.
+func (u *ProxyUpsert) SetPoolShareable(v bool) *ProxyUpsert {
+	u.Set(proxy.FieldPoolShareable, v)
+	return u
+}
+
+// UpdatePoolShareable sets the "pool_shareable" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdatePoolShareable() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldPoolShareable)
+	return u
+}
+
+// SetPoolShareMax sets the "pool_share_max" field.
+func (u *ProxyUpsert) SetPoolShareMax(v int) *ProxyUpsert {
+	u.Set(proxy.FieldPoolShareMax, v)
+	return u
+}
+
+// UpdatePoolShareMax sets the "pool_share_max" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdatePoolShareMax() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldPoolShareMax)
+	return u
+}
+
+// AddPoolShareMax adds v to the "pool_share_max" field.
+func (u *ProxyUpsert) AddPoolShareMax(v int) *ProxyUpsert {
+	u.Add(proxy.FieldPoolShareMax, v)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -1115,6 +1195,41 @@ func (u *ProxyUpsertOne) SetExternalRef(v string) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateExternalRef() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExternalRef()
+	})
+}
+
+// SetPoolShareable sets the "pool_shareable" field.
+func (u *ProxyUpsertOne) SetPoolShareable(v bool) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetPoolShareable(v)
+	})
+}
+
+// UpdatePoolShareable sets the "pool_shareable" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdatePoolShareable() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdatePoolShareable()
+	})
+}
+
+// SetPoolShareMax sets the "pool_share_max" field.
+func (u *ProxyUpsertOne) SetPoolShareMax(v int) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetPoolShareMax(v)
+	})
+}
+
+// AddPoolShareMax adds v to the "pool_share_max" field.
+func (u *ProxyUpsertOne) AddPoolShareMax(v int) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddPoolShareMax(v)
+	})
+}
+
+// UpdatePoolShareMax sets the "pool_share_max" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdatePoolShareMax() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdatePoolShareMax()
 	})
 }
 
@@ -1585,6 +1700,41 @@ func (u *ProxyUpsertBulk) SetExternalRef(v string) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateExternalRef() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExternalRef()
+	})
+}
+
+// SetPoolShareable sets the "pool_shareable" field.
+func (u *ProxyUpsertBulk) SetPoolShareable(v bool) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetPoolShareable(v)
+	})
+}
+
+// UpdatePoolShareable sets the "pool_shareable" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdatePoolShareable() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdatePoolShareable()
+	})
+}
+
+// SetPoolShareMax sets the "pool_share_max" field.
+func (u *ProxyUpsertBulk) SetPoolShareMax(v int) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetPoolShareMax(v)
+	})
+}
+
+// AddPoolShareMax adds v to the "pool_share_max" field.
+func (u *ProxyUpsertBulk) AddPoolShareMax(v int) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddPoolShareMax(v)
+	})
+}
+
+// UpdatePoolShareMax sets the "pool_share_max" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdatePoolShareMax() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdatePoolShareMax()
 	})
 }
 

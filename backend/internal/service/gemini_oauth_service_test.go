@@ -818,6 +818,10 @@ func (m *mockGeminiProxyRepo) CountExpiringSoon(ctx context.Context, now time.Ti
 	panic("not impl")
 }
 
+func (m *mockGeminiProxyRepo) GetPoolOccupancy(context.Context) (map[int64]int64, error) {
+	panic("not impl")
+}
+
 // mockDriveClient implements geminicli.DriveClient for tests.
 type mockDriveClient struct {
 	getStorageQuotaFunc func(ctx context.Context, accessToken, proxyURL string) (*geminicli.DriveStorageInfo, error)

@@ -537,6 +537,8 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		BackupProxyID:  p.BackupProxyID,
 		ExpiryWarnDays: p.ExpiryWarnDays,
 		Managed:        p.ManagedBy != "",
+		PoolShareable:  p.PoolShareable,
+		PoolShareMax:   p.PoolShareMax,
 	}
 }
 
@@ -547,6 +549,7 @@ func ProxyWithAccountCountFromService(p *service.ProxyWithAccountCount) *ProxyWi
 	return &ProxyWithAccountCount{
 		Proxy:          *ProxyFromService(&p.Proxy),
 		AccountCount:   p.AccountCount,
+		PoolUsed:       p.PoolUsed,
 		LatencyMs:      p.LatencyMs,
 		LatencyStatus:  p.LatencyStatus,
 		LatencyMessage: p.LatencyMessage,
@@ -592,6 +595,7 @@ func ProxyWithAccountCountFromServiceAdmin(p *service.ProxyWithAccountCount) *Ad
 	return &AdminProxyWithAccountCount{
 		AdminProxy:     *admin,
 		AccountCount:   p.AccountCount,
+		PoolUsed:       p.PoolUsed,
 		LatencyMs:      p.LatencyMs,
 		LatencyStatus:  p.LatencyStatus,
 		LatencyMessage: p.LatencyMessage,

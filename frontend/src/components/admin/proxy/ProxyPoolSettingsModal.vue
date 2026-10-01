@@ -44,6 +44,23 @@
         </label>
       </div>
 
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="defaultShareable" type="checkbox" class="pool-default-shareable" />
+          {{ t('admin.proxies.pool.defaultShareable') }}
+        </label>
+        <label class="input-label mt-3">{{ t('admin.proxies.pool.defaultShareMax') }}</label>
+        <input
+          v-model.number="defaultShareMax"
+          type="number"
+          min="0"
+          step="1"
+          class="input pool-default-share-max"
+          :disabled="!defaultShareable"
+        />
+        <p class="input-hint">{{ t('admin.proxies.pool.shareMaxHint') }}</p>
+      </div>
+
       <div v-if="healthText" :class="['text-sm', healthOk ? 'text-emerald-600' : 'text-red-600']">
         {{ healthText }}
       </div>
@@ -85,6 +102,8 @@ const config = ref<ProxyPoolConfig | null>(null)
 const url = ref('')
 const token = ref('')
 const clearToken = ref(false)
+const defaultShareable = ref(false)
+const defaultShareMax = ref(0)
 const busy = ref(false)
 const healthText = ref('')
 const healthOk = ref(false)
@@ -102,6 +121,8 @@ const load = async () => {
     config.value = await adminAPI.proxies.getPoolConfig()
     // Only a saved URL is editable here; an env URL is shown as the placeholder source.
     url.value = config.value.url_source === 'setting' ? config.value.url : ''
+    defaultShareable.value = config.value.default_shareable
+    defaultShareMax.value = config.value.default_share_max
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.proxies.pool.saveFailed'))
   }
@@ -118,7 +139,16 @@ watch(
 const handleSave = async () => {
   busy.value = true
   try {
-    const payload: { url: string; token?: string } = { url: url.value.trim() }
+    const payload: {
+      url: string
+      token?: string
+      default_shareable: boolean
+      default_share_max: number
+    } = {
+      url: url.value.trim(),
+      default_shareable: defaultShareable.value,
+      default_share_max: Math.max(0, Math.floor(Number(defaultShareMax.value) || 0))
+    }
     // Omitted token keeps the saved one; '' removes it.
     if (clearToken.value) payload.token = ''
     else if (token.value.trim()) payload.token = token.value.trim()

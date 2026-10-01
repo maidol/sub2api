@@ -16,11 +16,14 @@ import (
 )
 
 type fakeProxyPoolService struct {
-	gotURL      string
-	gotToken    *string
-	rotatedID   int64
-	leaseErr    error
-	updateCalls int
+	gotURL       string
+	gotToken     *string
+	rotatedID    int64
+	leaseErr     error
+	updateCalls  int
+	shared       bool
+	gotShareable *bool
+	gotShareMax  *int
 }
 
 func (f *fakeProxyPoolService) GetConfig(context.Context) (service.ProxyPoolConfigView, error) {
@@ -37,15 +40,30 @@ func (f *fakeProxyPoolService) Health(context.Context) (map[string]any, error) {
 	return map[string]any{"status": "ok"}, nil
 }
 
-func (f *fakeProxyPoolService) Lease(context.Context) (*service.Proxy, error) {
+func (f *fakeProxyPoolService) Allocate(context.Context) (*service.Proxy, bool, error) {
 	if f.leaseErr != nil {
-		return nil, f.leaseErr
+		return nil, false, f.leaseErr
 	}
 	return &service.Proxy{
 		ID: 42, Name: "Proxy pool · slot03", Protocol: "http", Host: "vpngate", Port: 20003,
 		Username: "slot03", Password: "secret-password", Status: service.StatusActive,
 		FallbackMode: service.FallbackModeNone, ManagedBy: service.ProxyManagedByPool, ExternalRef: "l-1",
-	}, nil
+		PoolShareable: true, PoolShareMax: 5,
+	}, f.shared, nil
+}
+
+func (f *fakeProxyPoolService) ListShareable(context.Context) ([]service.ProxyPoolShareCandidate, error) {
+	return []service.ProxyPoolShareCandidate{{
+		Proxy: service.Proxy{ID: 7, Name: "Proxy pool · slot07", Protocol: "http", Host: "vpngate", Port: 20007,
+			Password: "secret-password", ManagedBy: service.ProxyManagedByPool, ExternalRef: "l-7",
+			PoolShareable: true, PoolShareMax: 0},
+		Used: 3,
+	}}, nil
+}
+
+func (f *fakeProxyPoolService) UpdateShareDefaults(_ context.Context, shareable *bool, shareMax *int) error {
+	f.gotShareable, f.gotShareMax = shareable, shareMax
+	return nil
 }
 
 func (f *fakeProxyPoolService) Rotate(_ context.Context, id int64) (string, error) {
@@ -64,6 +82,7 @@ func newProxyPoolRouter(f *fakeProxyPoolService) *gin.Engine {
 	g.PUT("/pool/config", h.UpdateConfig)
 	g.GET("/pool/health", h.Health)
 	g.POST("/pool/lease", h.Lease)
+	g.GET("/pool/shareable", h.ListShareable)
 	g.GET("/:id", func(c *gin.Context) { c.String(http.StatusTeapot, "GetByID") })
 	g.POST("/:id/pool/rotate", h.Rotate)
 	return r
@@ -133,6 +152,38 @@ func TestProxyPoolRoutesDoNotShadowProxyByID(t *testing.T) {
 
 	rec, _ = serve(r, http.MethodPost, "/proxies/x/pool/rotate", ``)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestProxyPoolLeaseSaysWhetherTheSlotIsShared(t *testing.T) {
+	rec, out := serve(newProxyPoolRouter(&fakeProxyPoolService{shared: true}), http.MethodPost, "/proxies/pool/lease", ``)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	data := out["data"].(map[string]any)
+	require.Equal(t, true, data["shared"])
+	require.Equal(t, true, data["pool_shareable"])
+	require.Equal(t, float64(5), data["pool_share_max"])
+}
+
+func TestProxyPoolShareableListsCandidatesWithoutSecrets(t *testing.T) {
+	rec, out := serve(newProxyPoolRouter(&fakeProxyPoolService{}), http.MethodGet, "/proxies/pool/shareable", ``)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	items := out["data"].([]any)
+	require.Len(t, items, 1)
+	item := items[0].(map[string]any)
+	require.Equal(t, float64(3), item["used"])
+	require.Equal(t, float64(0), item["max"])
+	require.Equal(t, float64(7), item["proxy"].(map[string]any)["id"])
+	require.NotContains(t, rec.Body.String(), "secret-password")
+	require.NotContains(t, rec.Body.String(), "l-7")
+}
+
+func TestProxyPoolUpdateConfigPassesShareDefaults(t *testing.T) {
+	f := &fakeProxyPoolService{}
+	rec, _ := serve(newProxyPoolRouter(f), http.MethodPut, "/proxies/pool/config",
+		`{"url":"http://vpngate:20000","default_shareable":true,"default_share_max":3}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, f.gotShareable)
+	require.True(t, *f.gotShareable)
+	require.Equal(t, 3, *f.gotShareMax)
 }
 
 func ptr(s string) *string { return &s }

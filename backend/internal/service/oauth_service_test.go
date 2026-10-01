@@ -110,6 +110,10 @@ func (m *mockProxyRepoForOAuth) CountExpiringSoon(ctx context.Context, now time.
 	panic("CountExpiringSoon not implemented")
 }
 
+func (m *mockProxyRepoForOAuth) GetPoolOccupancy(context.Context) (map[int64]int64, error) {
+	panic("GetPoolOccupancy not implemented")
+}
+
 // =====================
 // 测试用例
 // =====================

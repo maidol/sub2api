@@ -1003,4 +1003,9 @@ describe('BulkEditAccountModal', () => {
       }
     })
   })
+
+  it('says that bulk edit cannot pick a proxy pool proxy', () => {
+    const wrapper = mountModal()
+    expect(wrapper.get('.bulk-edit-pool-hint').text()).toBe('admin.proxies.pool.bulkUnsupported')
+  })
 })

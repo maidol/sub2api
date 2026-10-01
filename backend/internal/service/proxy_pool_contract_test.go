@@ -63,7 +63,7 @@ func TestProxyPoolServiceAgainstTheRealLeaseAPI(t *testing.T) {
 		t.Fatalf("Health = %v, %v", health, err)
 	}
 
-	p, err := svc.Lease(ctx)
+	p, _, err := svc.Allocate(ctx)
 	if err != nil {
 		t.Fatalf("Lease: %v", err)
 	}
@@ -81,12 +81,13 @@ func TestProxyPoolServiceAgainstTheRealLeaseAPI(t *testing.T) {
 		t.Fatalf("Rotate = %q, %v (was %q, slot now %q)", node, err, before, ctrl.now["sub2api-slot01"])
 	}
 
-	// A second lease gets the other slot; the pool is then exhausted.
-	if _, err := svc.Lease(ctx); err != nil {
-		t.Fatalf("second Lease: %v", err)
+	// A second lease gets the other slot; the pool is then exhausted and no
+	// slot is shared.
+	if _, _, err := svc.Allocate(ctx); err != nil {
+		t.Fatalf("second Allocate: %v", err)
 	}
-	if _, err := svc.Lease(ctx); err != ErrProxyPoolExhausted {
-		t.Fatalf("third Lease err = %v, want ErrProxyPoolExhausted", err)
+	if _, _, err := svc.Allocate(ctx); err != ErrProxyPoolNoCapacity {
+		t.Fatalf("third Allocate err = %v, want ErrProxyPoolNoCapacity", err)
 	}
 
 	// A day later nobody uses the first proxy: Reconcile gives its slot back.
@@ -99,7 +100,7 @@ func TestProxyPoolServiceAgainstTheRealLeaseAPI(t *testing.T) {
 	if left := store.List(); len(left) != 1 || left[0].Slot != "slot02" {
 		t.Fatalf("provider leases after reconcile = %+v, want only slot02", left)
 	}
-	if _, err := svc.Lease(ctx); err != nil {
+	if _, _, err := svc.Allocate(ctx); err != nil {
 		t.Fatalf("slot01 must be leasable again: %v", err)
 	}
 }

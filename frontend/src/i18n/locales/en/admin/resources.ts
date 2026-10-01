@@ -78,7 +78,7 @@ export default {
       searchProxies: 'Search proxies...',
       pool: {
         option: 'Proxy pool (auto)',
-        optionHint: 'Lease a dedicated exit for this account from the proxy pool',
+        optionHint: 'Lease a dedicated exit when a slot is free, otherwise use a shared slot with room',
         leasing: 'Leasing a proxy from the pool…',
         leased: 'Leased {name}. Save the account to keep it.',
         leaseFailed: 'Could not lease from the proxy pool',
@@ -106,7 +106,18 @@ export default {
         testOk: 'Provider reachable: {leased}/{slots} leased, {nodes} nodes',
         testFailed: 'Provider not reachable',
         saved: 'Proxy pool settings saved',
-        saveFailed: 'Could not save the proxy pool settings'
+        saveFailed: 'Could not save the proxy pool settings',
+        sharedGroup: 'Shared proxy pool slots',
+        sharedPicked: 'Picked shared slot {name} ({usage}). Save the account to keep it.',
+        leasedShared: 'The pool is full; assigned shared slot {name}. Save the account to keep it.',
+        rotateSharedConfirm: 'This slot is shared: changing its exit affects every account on it. Continue?',
+        shareable: 'Let other accounts share this slot',
+        shareMax: 'Max accounts',
+        shareMaxHint: 'Includes the first account on it; 0 means no limit',
+        overLimit: '{count} account(s) above the limit: they keep working, but no new account can join',
+        defaultShareable: 'New slots are shared by default',
+        defaultShareMax: 'Default max accounts for new slots',
+        bulkUnsupported: 'Bulk edit cannot pick a proxy pool proxy; set it on each account instead'
       },
       allProtocols: 'All Protocols',
       allStatus: 'All Status',

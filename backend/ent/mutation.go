@@ -37386,6 +37386,9 @@ type ProxyMutation struct {
 	addexpiry_warn_days    *int
 	managed_by             *string
 	external_ref           *string
+	pool_shareable         *bool
+	pool_share_max         *int
+	addpool_share_max      *int
 	clearedFields          map[string]struct{}
 	accounts               map[int64]struct{}
 	removedaccounts        map[int64]struct{}
@@ -38179,6 +38182,98 @@ func (m *ProxyMutation) ResetExternalRef() {
 	m.external_ref = nil
 }
 
+// SetPoolShareable sets the "pool_shareable" field.
+func (m *ProxyMutation) SetPoolShareable(b bool) {
+	m.pool_shareable = &b
+}
+
+// PoolShareable returns the value of the "pool_shareable" field in the mutation.
+func (m *ProxyMutation) PoolShareable() (r bool, exists bool) {
+	v := m.pool_shareable
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPoolShareable returns the old "pool_shareable" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldPoolShareable(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPoolShareable is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPoolShareable requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPoolShareable: %w", err)
+	}
+	return oldValue.PoolShareable, nil
+}
+
+// ResetPoolShareable resets all changes to the "pool_shareable" field.
+func (m *ProxyMutation) ResetPoolShareable() {
+	m.pool_shareable = nil
+}
+
+// SetPoolShareMax sets the "pool_share_max" field.
+func (m *ProxyMutation) SetPoolShareMax(i int) {
+	m.pool_share_max = &i
+	m.addpool_share_max = nil
+}
+
+// PoolShareMax returns the value of the "pool_share_max" field in the mutation.
+func (m *ProxyMutation) PoolShareMax() (r int, exists bool) {
+	v := m.pool_share_max
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPoolShareMax returns the old "pool_share_max" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldPoolShareMax(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPoolShareMax is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPoolShareMax requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPoolShareMax: %w", err)
+	}
+	return oldValue.PoolShareMax, nil
+}
+
+// AddPoolShareMax adds i to the "pool_share_max" field.
+func (m *ProxyMutation) AddPoolShareMax(i int) {
+	if m.addpool_share_max != nil {
+		*m.addpool_share_max += i
+	} else {
+		m.addpool_share_max = &i
+	}
+}
+
+// AddedPoolShareMax returns the value that was added to the "pool_share_max" field in this mutation.
+func (m *ProxyMutation) AddedPoolShareMax() (r int, exists bool) {
+	v := m.addpool_share_max
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPoolShareMax resets all changes to the "pool_share_max" field.
+func (m *ProxyMutation) ResetPoolShareMax() {
+	m.pool_share_max = nil
+	m.addpool_share_max = nil
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by ids.
 func (m *ProxyMutation) AddAccountIDs(ids ...int64) {
 	if m.accounts == nil {
@@ -38348,7 +38443,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 16)
+	fields := make([]string, 0, 18)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -38397,6 +38492,12 @@ func (m *ProxyMutation) Fields() []string {
 	if m.external_ref != nil {
 		fields = append(fields, proxy.FieldExternalRef)
 	}
+	if m.pool_shareable != nil {
+		fields = append(fields, proxy.FieldPoolShareable)
+	}
+	if m.pool_share_max != nil {
+		fields = append(fields, proxy.FieldPoolShareMax)
+	}
 	return fields
 }
 
@@ -38437,6 +38538,10 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.ManagedBy()
 	case proxy.FieldExternalRef:
 		return m.ExternalRef()
+	case proxy.FieldPoolShareable:
+		return m.PoolShareable()
+	case proxy.FieldPoolShareMax:
+		return m.PoolShareMax()
 	}
 	return nil, false
 }
@@ -38478,6 +38583,10 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldManagedBy(ctx)
 	case proxy.FieldExternalRef:
 		return m.OldExternalRef(ctx)
+	case proxy.FieldPoolShareable:
+		return m.OldPoolShareable(ctx)
+	case proxy.FieldPoolShareMax:
+		return m.OldPoolShareMax(ctx)
 	}
 	return nil, fmt.Errorf("unknown Proxy field %s", name)
 }
@@ -38599,6 +38708,20 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetExternalRef(v)
 		return nil
+	case proxy.FieldPoolShareable:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPoolShareable(v)
+		return nil
+	case proxy.FieldPoolShareMax:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPoolShareMax(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Proxy field %s", name)
 }
@@ -38613,6 +38736,9 @@ func (m *ProxyMutation) AddedFields() []string {
 	if m.addexpiry_warn_days != nil {
 		fields = append(fields, proxy.FieldExpiryWarnDays)
 	}
+	if m.addpool_share_max != nil {
+		fields = append(fields, proxy.FieldPoolShareMax)
+	}
 	return fields
 }
 
@@ -38625,6 +38751,8 @@ func (m *ProxyMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedPort()
 	case proxy.FieldExpiryWarnDays:
 		return m.AddedExpiryWarnDays()
+	case proxy.FieldPoolShareMax:
+		return m.AddedPoolShareMax()
 	}
 	return nil, false
 }
@@ -38647,6 +38775,13 @@ func (m *ProxyMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddExpiryWarnDays(v)
+		return nil
+	case proxy.FieldPoolShareMax:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPoolShareMax(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy numeric field %s", name)
@@ -38755,6 +38890,12 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldExternalRef:
 		m.ResetExternalRef()
+		return nil
+	case proxy.FieldPoolShareable:
+		m.ResetPoolShareable()
+		return nil
+	case proxy.FieldPoolShareMax:
+		m.ResetPoolShareMax()
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy field %s", name)

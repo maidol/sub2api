@@ -52,6 +52,8 @@ type UpdateProxyRequest struct {
 	FallbackMode   string                 `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  dto.NullableInt64Field `json:"backup_proxy_id"`
 	ExpiryWarnDays *int                   `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	PoolShareable  *bool                  `json:"pool_shareable"`
+	PoolShareMax   *int                   `json:"pool_share_max" binding:"omitempty,min=0"`
 }
 
 // List handles listing all proxies with pagination
@@ -207,6 +209,8 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		BackupProxyID:  req.BackupProxyID.Value,
 		ClearBackupID:  req.BackupProxyID.Set && req.BackupProxyID.Value == nil,
 		ExpiryWarnDays: req.ExpiryWarnDays,
+		PoolShareable:  req.PoolShareable,
+		PoolShareMax:   req.PoolShareMax,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

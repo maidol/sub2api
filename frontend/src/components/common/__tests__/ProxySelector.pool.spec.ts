@@ -6,11 +6,15 @@ import type { Proxy } from '@/types'
 const testProxy = vi.hoisted(() => vi.fn())
 const leaseFromPool = vi.hoisted(() => vi.fn())
 const rotatePoolProxy = vi.hoisted(() => vi.fn())
-vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { testProxy, leaseFromPool, rotatePoolProxy } } }))
+const listShareablePoolProxies = vi.hoisted(() => vi.fn())
+vi.mock('@/api/admin', () => ({
+  adminAPI: { proxies: { testProxy, leaseFromPool, rotatePoolProxy, listShareablePoolProxies } }
+}))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
 beforeEach(() => {
   vi.clearAllMocks()
+  listShareablePoolProxies.mockResolvedValue([])
 })
 
 const proxy = (id: number, managed = false) =>
@@ -88,6 +92,54 @@ describe('proxy pool mode', () => {
     await flushPromises()
     expect(rotatePoolProxy).toHaveBeenCalledWith(2)
     expect(wrapper.get('.pool-status').text()).toContain('admin.proxies.pool.rotated')
+  })
+
+  it('lists shared slots with room and selects one', async () => {
+    const shared = { ...proxy(9, true), name: 'Proxy pool · slot09', pool_shareable: true, pool_share_max: 0 }
+    listShareablePoolProxies.mockResolvedValue([
+      { proxy: shared, used: 3, max: 0 },
+      { proxy: proxy(2, true), used: 1, max: 4 }
+    ])
+    const wrapper = mountSelector({ allowPool: true, modelValue: 2 })
+    await wrapper.get('.select-trigger').trigger('click')
+    await flushPromises()
+
+    const options = wrapper.findAll('.pool-shared-option')
+    expect(options).toHaveLength(1) // proxy 2 is the current selection, not offered again
+    expect(options[0].text()).toContain('slot09')
+    expect(options[0].text()).toContain('3/∞')
+
+    await options[0].trigger('click')
+    expect(wrapper.emitted('leased')?.[0][0]).toMatchObject({ id: 9 })
+    expect(wrapper.emitted('update:modelValue')).toEqual([[9]])
+  })
+
+  it('does not load shared slots without allowPool', async () => {
+    const wrapper = mountSelector({})
+    await wrapper.get('.select-trigger').trigger('click')
+    await flushPromises()
+    expect(listShareablePoolProxies).not.toHaveBeenCalled()
+  })
+
+  it('says when auto allocation fell back to a shared slot', async () => {
+    leaseFromPool.mockResolvedValue({ ...proxy(9, true), shared: true })
+    const wrapper = mountSelector({ allowPool: true })
+    await wrapper.get('.select-trigger').trigger('click')
+    await wrapper.get('.pool-option').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.pool-status').text()).toContain('admin.proxies.pool.leasedShared')
+    expect(wrapper.emitted('leased')?.[0][0]).not.toHaveProperty('shared')
+  })
+
+  it('asks before changing the exit of a shared slot', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const shared = { ...proxy(2, true), pool_shareable: true }
+    const wrapper = mountSelector({ allowPool: true, modelValue: 2, proxies: [proxy(1), shared] })
+    await wrapper.get('.pool-rotate-btn').trigger('click')
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(rotatePoolProxy).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
   })
 
   it('shows no change-exit button for a hand-made proxy', () => {

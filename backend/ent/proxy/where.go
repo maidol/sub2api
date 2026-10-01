@@ -135,6 +135,16 @@ func ExternalRef(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExternalRef, v))
 }
 
+// PoolShareable applies equality check predicate on the "pool_shareable" field. It's identical to PoolShareableEQ.
+func PoolShareable(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldPoolShareable, v))
+}
+
+// PoolShareMax applies equality check predicate on the "pool_share_max" field. It's identical to PoolShareMaxEQ.
+func PoolShareMax(v int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldPoolShareMax, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldCreatedAt, v))
@@ -1028,6 +1038,56 @@ func ExternalRefEqualFold(v string) predicate.Proxy {
 // ExternalRefContainsFold applies the ContainsFold predicate on the "external_ref" field.
 func ExternalRefContainsFold(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldContainsFold(FieldExternalRef, v))
+}
+
+// PoolShareableEQ applies the EQ predicate on the "pool_shareable" field.
+func PoolShareableEQ(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldPoolShareable, v))
+}
+
+// PoolShareableNEQ applies the NEQ predicate on the "pool_shareable" field.
+func PoolShareableNEQ(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldPoolShareable, v))
+}
+
+// PoolShareMaxEQ applies the EQ predicate on the "pool_share_max" field.
+func PoolShareMaxEQ(v int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldPoolShareMax, v))
+}
+
+// PoolShareMaxNEQ applies the NEQ predicate on the "pool_share_max" field.
+func PoolShareMaxNEQ(v int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldPoolShareMax, v))
+}
+
+// PoolShareMaxIn applies the In predicate on the "pool_share_max" field.
+func PoolShareMaxIn(vs ...int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldPoolShareMax, vs...))
+}
+
+// PoolShareMaxNotIn applies the NotIn predicate on the "pool_share_max" field.
+func PoolShareMaxNotIn(vs ...int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldPoolShareMax, vs...))
+}
+
+// PoolShareMaxGT applies the GT predicate on the "pool_share_max" field.
+func PoolShareMaxGT(v int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldPoolShareMax, v))
+}
+
+// PoolShareMaxGTE applies the GTE predicate on the "pool_share_max" field.
+func PoolShareMaxGTE(v int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldPoolShareMax, v))
+}
+
+// PoolShareMaxLT applies the LT predicate on the "pool_share_max" field.
+func PoolShareMaxLT(v int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldPoolShareMax, v))
+}
+
+// PoolShareMaxLTE applies the LTE predicate on the "pool_share_max" field.
+func PoolShareMaxLTE(v int) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldPoolShareMax, v))
 }
 
 // HasAccounts applies the HasEdge predicate on the "accounts" edge.

@@ -690,6 +690,7 @@
             :proxies="proxies"
             aria-labelledby="bulk-edit-proxy-label"
           />
+          <p class="input-hint bulk-edit-pool-hint">{{ t('admin.proxies.pool.bulkUnsupported') }}</p>
         </div>
       </div>
 

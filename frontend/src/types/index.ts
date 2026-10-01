@@ -957,8 +957,14 @@ export interface Proxy {
   expires_at: string | null
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
-  /** Leased from the proxy pool; belongs to one account. */
+  /** Leased from the proxy pool. */
   managed?: boolean
+  /** Pool-managed only: other accounts may share this slot. */
+  pool_shareable?: boolean
+  /** Pool-managed only: max accounts on a shared slot; 0 = no limit. */
+  pool_share_max?: number
+  /** Pool-managed only: accounts on this slot (spark shadows excluded). */
+  pool_used?: number
   expiry_warn_days: number
   created_at: string
   updated_at: string

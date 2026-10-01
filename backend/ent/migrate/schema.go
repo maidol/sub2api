@@ -1415,6 +1415,8 @@ var (
 		{Name: "expiry_warn_days", Type: field.TypeInt, Default: 7},
 		{Name: "managed_by", Type: field.TypeString, Size: 20, Default: ""},
 		{Name: "external_ref", Type: field.TypeString, Size: 100, Default: ""},
+		{Name: "pool_shareable", Type: field.TypeBool, Default: false},
+		{Name: "pool_share_max", Type: field.TypeInt, Default: 0},
 		{Name: "backup_proxy_id", Type: field.TypeInt64, Nullable: true},
 	}
 	// ProxiesTable holds the schema information for the "proxies" table.
@@ -1425,7 +1427,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "proxies_proxies_backup_proxy",
-				Columns:    []*schema.Column{ProxiesColumns[16]},
+				Columns:    []*schema.Column{ProxiesColumns[18]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -1449,7 +1451,7 @@ var (
 			{
 				Name:    "proxy_backup_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{ProxiesColumns[16]},
+				Columns: []*schema.Column{ProxiesColumns[18]},
 			},
 		},
 	}

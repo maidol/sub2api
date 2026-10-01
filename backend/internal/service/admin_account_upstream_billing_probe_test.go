@@ -720,6 +720,18 @@ func TestBulkUpdateAccountsInvalidatesProbeSnapshotForIdentityCredentials(t *tes
 	require.Nil(t, repo.bulkUpdates[0].Extra[UpstreamBillingProbeExtraKey])
 }
 
+// bulkProbeProxyRepo answers the pool-proxy check BulkUpdateAccounts makes
+// before a proxy change; any other ProxyRepository call panics (nil embed).
+type bulkProbeProxyRepo struct {
+	ProxyRepository
+	proxy *Proxy
+}
+
+func (r *bulkProbeProxyRepo) GetByID(context.Context, int64) (*Proxy, error) {
+	cp := *r.proxy
+	return &cp, nil
+}
+
 func TestBulkUpdateAccountsInvalidatesProbeSnapshotForProxyUpdate(t *testing.T) {
 	proxyID := int64(9)
 	baseRepo := &upstreamBillingProbeAccountRepo{}
@@ -728,7 +740,8 @@ func TestBulkUpdateAccountsInvalidatesProbeSnapshotForProxyUpdate(t *testing.T) 
 		ProxyID:    &proxyID,
 	}
 
-	result, err := (&adminServiceImpl{accountRepo: &upstreamBillingProbeAdminRepo{baseRepo}}).BulkUpdateAccounts(context.Background(), input)
+	proxies := &bulkProbeProxyRepo{proxy: &Proxy{ID: proxyID, Name: "hand-made"}}
+	result, err := (&adminServiceImpl{accountRepo: &upstreamBillingProbeAdminRepo{baseRepo}, proxyRepo: proxies}).BulkUpdateAccounts(context.Background(), input)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Success)

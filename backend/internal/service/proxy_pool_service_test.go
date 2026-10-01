@@ -113,6 +113,22 @@ func (r *poolProxyRepo) ListAllForFallback(context.Context) ([]Proxy, error) {
 func (r *poolProxyRepo) CountAccountsByProxyID(_ context.Context, id int64) (int64, error) {
 	return r.counts[id], nil
 }
+func (r *poolProxyRepo) GetPoolOccupancy(context.Context) (map[int64]int64, error) {
+	out := map[int64]int64{}
+	for id, p := range r.rows {
+		if p.ManagedBy == ProxyManagedByPool {
+			out[id] = r.counts[id]
+		}
+	}
+	return out, nil
+}
+
+func (r *poolProxyRepo) Update(_ context.Context, p *Proxy) error {
+	cp := *p
+	r.rows[p.ID] = &cp
+	return nil
+}
+
 func (r *poolProxyRepo) Delete(_ context.Context, id int64) error {
 	delete(r.rows, id)
 	r.deleted = append(r.deleted, id)
@@ -219,7 +235,7 @@ func TestProxyPoolLeaseStoresAPoolManagedProxy(t *testing.T) {
 		return http.StatusOK, poolLeaseJSON
 	}}
 	svc, _, repo := newPoolService(t, f)
-	p, err := svc.Lease(context.Background())
+	p, _, err := svc.Allocate(context.Background())
 	if err != nil {
 		t.Fatalf("Lease: %v", err)
 	}
@@ -246,7 +262,8 @@ func TestProxyPoolLeaseMapsProviderErrors(t *testing.T) {
 		body   string
 		want   error
 	}{
-		{http.StatusServiceUnavailable, `{"error":"pool_exhausted"}`, ErrProxyPoolExhausted},
+		// No shared slot to fall back to: a full pool reports no capacity.
+		{http.StatusServiceUnavailable, `{"error":"pool_exhausted"}`, ErrProxyPoolNoCapacity},
 		{http.StatusServiceUnavailable, `{"error":"no_healthy_node"}`, ErrProxyPoolNoHealthyNode},
 		{http.StatusUnauthorized, `{"error":"unauthorized"}`, ErrProxyPoolUnavailable},
 		{http.StatusInternalServerError, `oops`, ErrProxyPoolUnavailable},
@@ -254,7 +271,7 @@ func TestProxyPoolLeaseMapsProviderErrors(t *testing.T) {
 	for _, c := range cases {
 		f := &fakePoolProvider{handle: func(string, string, string) (int, string) { return c.status, c.body }}
 		svc, _, repo := newPoolService(t, f)
-		if _, err := svc.Lease(context.Background()); !errors.Is(err, c.want) {
+		if _, _, err := svc.Allocate(context.Background()); !errors.Is(err, c.want) {
 			t.Errorf("%d %s: err = %v, want %v", c.status, c.body, err, c.want)
 		}
 		if len(repo.rows) != 0 {
@@ -266,7 +283,7 @@ func TestProxyPoolLeaseMapsProviderErrors(t *testing.T) {
 func TestProxyPoolLeaseWithoutProviderConfigDoesNotCallOut(t *testing.T) {
 	svc, _, repo := newPoolService(t, nil)
 	svc.envToken = ""
-	if _, err := svc.Lease(context.Background()); !errors.Is(err, ErrProxyPoolNotConfigured) {
+	if _, _, err := svc.Allocate(context.Background()); !errors.Is(err, ErrProxyPoolNotConfigured) {
 		t.Fatalf("err = %v, want ErrProxyPoolNotConfigured", err)
 	}
 	if len(repo.rows) != 0 {
@@ -290,7 +307,7 @@ func TestProxyPoolLeaseReleasesTheLeaseItCannotUse(t *testing.T) {
 		}}
 		svc, _, repo := newPoolService(t, f)
 		repo.createErr = tc.createErr
-		if _, err := svc.Lease(context.Background()); err == nil {
+		if _, _, err := svc.Allocate(context.Background()); err == nil {
 			t.Fatalf("%s: expected an error", name)
 		}
 		if last := f.seen[len(f.seen)-1]; last != "DELETE /v1/leases/l-1 " {

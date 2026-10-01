@@ -410,6 +410,10 @@ func (s *proxyRepoStub) CountExpiringSoon(_ context.Context, _ time.Time) (int64
 	return 0, nil
 }
 
+func (s *proxyRepoStub) GetPoolOccupancy(context.Context) (map[int64]int64, error) {
+	return map[int64]int64{}, nil
+}
+
 type redeemRepoStub struct {
 	deleteErrByID map[int64]error
 	deletedIDs    []int64

@@ -33,6 +33,20 @@ type Proxy struct {
 	ExpiryWarnDays int
 	ManagedBy      string // "" = hand-made, ProxyManagedByPool = leased from the pool
 	ExternalRef    string // provider lease ID when ManagedBy is set
+	PoolShareable  bool   // pool-managed only: other accounts may share this slot
+	PoolShareMax   int    // pool-managed only: max accounts when shared; 0 = no limit
+}
+
+// PoolCapacity is how many accounts a pool-managed proxy may hold: 1 when it
+// is not shared, unlimited (limited=false) when shared with max 0.
+func (p *Proxy) PoolCapacity() (capacity int64, limited bool) {
+	if !p.PoolShareable {
+		return 1, true
+	}
+	if p.PoolShareMax <= 0 {
+		return 0, false
+	}
+	return int64(p.PoolShareMax), true
 }
 
 func (p *Proxy) IsActive() bool {
@@ -58,6 +72,7 @@ func (p *Proxy) URL() string {
 type ProxyWithAccountCount struct {
 	Proxy
 	AccountCount   int64
+	PoolUsed       int64 // pool-managed only: accounts on it, spark shadows excluded
 	LatencyMs      *int64
 	LatencyStatus  string
 	LatencyMessage string

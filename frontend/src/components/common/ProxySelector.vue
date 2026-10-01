@@ -90,6 +90,24 @@
             <Icon v-if="selectedProxy?.managed" name="check" size="sm" class="text-primary-500" />
           </div>
 
+          <!-- Shared pool slots that still have room -->
+          <template v-if="allowPool && sharedCandidates.length > 0">
+            <div class="select-group-label">{{ t('admin.proxies.pool.sharedGroup') }}</div>
+            <div
+              v-for="c in sharedCandidates"
+              :key="`shared-${c.proxy.id}`"
+              @click="selectShared(c)"
+              class="select-option pool-shared-option"
+            >
+              <span class="min-w-0 flex-1 truncate font-medium">{{ c.proxy.name }}</span>
+              <span
+                class="inline-flex flex-shrink-0 items-center rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-dark-600 dark:text-gray-400"
+              >
+                {{ usageText(c.used, c.max) }}
+              </span>
+            </div>
+          </template>
+
           <!-- Proxy options -->
           <div
             v-for="proxy in filteredProxies"
@@ -201,11 +219,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
 import type { Proxy } from '@/types'
+import type { PoolShareCandidate } from '@/api/admin/proxies'
 
 const { t } = useI18n()
 
@@ -253,6 +272,39 @@ const leasing = ref(false)
 const rotating = ref(false)
 const poolMessage = ref('')
 const poolError = ref(false)
+const shareCandidates = ref<PoolShareCandidate[]>([])
+
+// The current selection is shown in the trigger already; do not offer it again.
+const sharedCandidates = computed(() =>
+  shareCandidates.value.filter((c) => c.proxy.id !== props.modelValue)
+)
+
+const usageText = (used: number, max: number) => `${used}/${max > 0 ? max : '∞'}`
+
+const loadShareCandidates = async () => {
+  try {
+    shareCandidates.value = await adminAPI.proxies.listShareablePoolProxies()
+  } catch {
+    shareCandidates.value = [] // a convenience list; the pool option still works without it
+  }
+}
+
+watch(isOpen, (open) => {
+  if (open && props.allowPool) loadShareCandidates()
+})
+
+const selectShared = (c: PoolShareCandidate) => {
+  if (!leasedProxies.value.some((p) => p.id === c.proxy.id)) leasedProxies.value.push(c.proxy)
+  emit('leased', c.proxy)
+  emit('update:modelValue', c.proxy.id)
+  poolError.value = false
+  poolMessage.value = t('admin.proxies.pool.sharedPicked', {
+    name: c.proxy.name,
+    usage: usageText(c.used, c.max)
+  })
+  isOpen.value = false
+  searchQuery.value = ''
+}
 
 // What the trigger can show: the given list plus proxies leased here that the
 // parent's list does not contain yet.
@@ -336,11 +388,13 @@ const handlePoolOption = async () => {
   poolMessage.value = ''
   poolError.value = false
   try {
-    const proxy = await adminAPI.proxies.leaseFromPool()
+    const { shared, ...proxy } = await adminAPI.proxies.leaseFromPool()
     leasedProxies.value.push(proxy)
     emit('leased', proxy)
     emit('update:modelValue', proxy.id)
-    poolMessage.value = t('admin.proxies.pool.leased', { name: proxy.name })
+    poolMessage.value = shared
+      ? t('admin.proxies.pool.leasedShared', { name: proxy.name })
+      : t('admin.proxies.pool.leased', { name: proxy.name })
   } catch (error: any) {
     poolError.value = true
     poolMessage.value = errorText(error, t('admin.proxies.pool.leaseFailed'))
@@ -352,6 +406,8 @@ const handlePoolOption = async () => {
 const handleRotate = async () => {
   const proxy = selectedProxy.value
   if (!proxy?.managed || rotating.value) return
+  // Rotation moves the whole slot, so every account sharing it changes exit.
+  if (proxy.pool_shareable && !window.confirm(t('admin.proxies.pool.rotateSharedConfirm'))) return
 
   rotating.value = true
   poolMessage.value = ''
@@ -406,6 +462,10 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.select-group-label {
+  @apply px-3 pb-1 pt-2 text-xs font-medium text-gray-500 dark:text-gray-400;
+}
+
 .select-trigger {
   @apply flex w-full items-center justify-between gap-2;
   @apply rounded-xl px-4 py-2.5 text-sm;

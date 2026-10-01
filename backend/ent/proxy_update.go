@@ -275,6 +275,41 @@ func (_u *ProxyUpdate) SetNillableExternalRef(v *string) *ProxyUpdate {
 	return _u
 }
 
+// SetPoolShareable sets the "pool_shareable" field.
+func (_u *ProxyUpdate) SetPoolShareable(v bool) *ProxyUpdate {
+	_u.mutation.SetPoolShareable(v)
+	return _u
+}
+
+// SetNillablePoolShareable sets the "pool_shareable" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillablePoolShareable(v *bool) *ProxyUpdate {
+	if v != nil {
+		_u.SetPoolShareable(*v)
+	}
+	return _u
+}
+
+// SetPoolShareMax sets the "pool_share_max" field.
+func (_u *ProxyUpdate) SetPoolShareMax(v int) *ProxyUpdate {
+	_u.mutation.ResetPoolShareMax()
+	_u.mutation.SetPoolShareMax(v)
+	return _u
+}
+
+// SetNillablePoolShareMax sets the "pool_share_max" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillablePoolShareMax(v *int) *ProxyUpdate {
+	if v != nil {
+		_u.SetPoolShareMax(*v)
+	}
+	return _u
+}
+
+// AddPoolShareMax adds value to the "pool_share_max" field.
+func (_u *ProxyUpdate) AddPoolShareMax(v int) *ProxyUpdate {
+	_u.mutation.AddPoolShareMax(v)
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdate) AddAccountIDs(ids ...int64) *ProxyUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -526,6 +561,15 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.ExternalRef(); ok {
 		_spec.SetField(proxy.FieldExternalRef, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.PoolShareable(); ok {
+		_spec.SetField(proxy.FieldPoolShareable, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.PoolShareMax(); ok {
+		_spec.SetField(proxy.FieldPoolShareMax, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedPoolShareMax(); ok {
+		_spec.AddField(proxy.FieldPoolShareMax, field.TypeInt, value)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -912,6 +956,41 @@ func (_u *ProxyUpdateOne) SetNillableExternalRef(v *string) *ProxyUpdateOne {
 	return _u
 }
 
+// SetPoolShareable sets the "pool_shareable" field.
+func (_u *ProxyUpdateOne) SetPoolShareable(v bool) *ProxyUpdateOne {
+	_u.mutation.SetPoolShareable(v)
+	return _u
+}
+
+// SetNillablePoolShareable sets the "pool_shareable" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillablePoolShareable(v *bool) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetPoolShareable(*v)
+	}
+	return _u
+}
+
+// SetPoolShareMax sets the "pool_share_max" field.
+func (_u *ProxyUpdateOne) SetPoolShareMax(v int) *ProxyUpdateOne {
+	_u.mutation.ResetPoolShareMax()
+	_u.mutation.SetPoolShareMax(v)
+	return _u
+}
+
+// SetNillablePoolShareMax sets the "pool_share_max" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillablePoolShareMax(v *int) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetPoolShareMax(*v)
+	}
+	return _u
+}
+
+// AddPoolShareMax adds value to the "pool_share_max" field.
+func (_u *ProxyUpdateOne) AddPoolShareMax(v int) *ProxyUpdateOne {
+	_u.mutation.AddPoolShareMax(v)
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdateOne) AddAccountIDs(ids ...int64) *ProxyUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -1193,6 +1272,15 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.ExternalRef(); ok {
 		_spec.SetField(proxy.FieldExternalRef, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.PoolShareable(); ok {
+		_spec.SetField(proxy.FieldPoolShareable, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.PoolShareMax(); ok {
+		_spec.SetField(proxy.FieldPoolShareMax, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedPoolShareMax(); ok {
+		_spec.AddField(proxy.FieldPoolShareMax, field.TypeInt, value)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{

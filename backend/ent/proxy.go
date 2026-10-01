@@ -49,6 +49,10 @@ type Proxy struct {
 	ManagedBy string `json:"managed_by,omitempty"`
 	// Provider lease ID when managed_by is set.
 	ExternalRef string `json:"external_ref,omitempty"`
+	// Pool-managed only: other accounts may share this slot.
+	PoolShareable bool `json:"pool_shareable,omitempty"`
+	// Pool-managed only: max accounts on a shared slot; 0 = no limit.
+	PoolShareMax int `json:"pool_share_max,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the ProxyQuery when eager-loading is set.
 	Edges        ProxyEdges `json:"edges"`
@@ -102,7 +106,9 @@ func (*Proxy) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case proxy.FieldID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
+		case proxy.FieldPoolShareable:
+			values[i] = new(sql.NullBool)
+		case proxy.FieldID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays, proxy.FieldPoolShareMax:
 			values[i] = new(sql.NullInt64)
 		case proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode, proxy.FieldManagedBy, proxy.FieldExternalRef:
 			values[i] = new(sql.NullString)
@@ -230,6 +236,18 @@ func (_m *Proxy) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ExternalRef = value.String
 			}
+		case proxy.FieldPoolShareable:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field pool_shareable", values[i])
+			} else if value.Valid {
+				_m.PoolShareable = value.Bool
+			}
+		case proxy.FieldPoolShareMax:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field pool_share_max", values[i])
+			} else if value.Valid {
+				_m.PoolShareMax = int(value.Int64)
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -338,6 +356,12 @@ func (_m *Proxy) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("external_ref=")
 	builder.WriteString(_m.ExternalRef)
+	builder.WriteString(", ")
+	builder.WriteString("pool_shareable=")
+	builder.WriteString(fmt.Sprintf("%v", _m.PoolShareable))
+	builder.WriteString(", ")
+	builder.WriteString("pool_share_max=")
+	builder.WriteString(fmt.Sprintf("%v", _m.PoolShareMax))
 	builder.WriteByte(')')
 	return builder.String()
 }

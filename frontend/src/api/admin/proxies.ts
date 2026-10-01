@@ -270,6 +270,9 @@ export interface ProxyPoolConfig {
   url_source: 'setting' | 'env' | ''
   token_source: 'setting' | 'env' | ''
   token_configured: boolean
+  /** Share settings a newly leased slot starts with; max 0 = no limit. */
+  default_shareable: boolean
+  default_share_max: number
 }
 
 export async function getPoolConfig(): Promise<ProxyPoolConfig> {
@@ -284,6 +287,8 @@ export async function getPoolConfig(): Promise<ProxyPoolConfig> {
 export async function updatePoolConfig(payload: {
   url: string
   token?: string
+  default_shareable?: boolean
+  default_share_max?: number
 }): Promise<ProxyPoolConfig> {
   const { data } = await apiClient.put<ProxyPoolConfig>('/admin/proxies/pool/config', payload)
   return data
@@ -294,9 +299,24 @@ export async function getPoolHealth(): Promise<Record<string, unknown>> {
   return data
 }
 
-/** Lease a pool-managed proxy for one account (use its id as proxy_id). */
-export async function leaseFromPool(): Promise<Proxy> {
-  const { data } = await apiClient.post<Proxy>('/admin/proxies/pool/lease')
+/** A pool proxy given to an account: a new slot, or a shared one (shared=true). */
+export type PoolAllocation = Proxy & { shared: boolean }
+
+/** Get a pool proxy for one account (use its id as proxy_id). */
+export async function leaseFromPool(): Promise<PoolAllocation> {
+  const { data } = await apiClient.post<PoolAllocation>('/admin/proxies/pool/lease')
+  return data
+}
+
+/** A shared pool slot that still has room. max 0 = no limit. */
+export interface PoolShareCandidate {
+  proxy: Proxy
+  used: number
+  max: number
+}
+
+export async function listShareablePoolProxies(): Promise<PoolShareCandidate[]> {
+  const { data } = await apiClient.get<PoolShareCandidate[]>('/admin/proxies/pool/shareable')
   return data
 }
 
@@ -327,6 +347,7 @@ export const proxiesAPI = {
   updatePoolConfig,
   getPoolHealth,
   leaseFromPool,
+  listShareablePoolProxies,
   rotatePoolProxy
 }
 

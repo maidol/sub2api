@@ -125,13 +125,41 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
-	if err := createAccountRecord(ctx, r.client, account); err != nil {
+	if account != nil && account.ProxyID != nil && !account.IsShadow() {
+		if err := r.createWithPoolCapacityGuard(ctx, account); err != nil {
+			return err
+		}
+	} else if err := createAccountRecord(ctx, r.client, account); err != nil {
 		return err
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
 	}
 	return nil
+}
+
+// createWithPoolCapacityGuard checks the proxy's account limit and inserts the
+// account in one transaction (the caller's, when ctx carries one).
+func (r *accountRepository) createWithPoolCapacityGuard(ctx context.Context, account *service.Account) error {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		if err := guardPoolProxyCapacity(ctx, tx.Client(), account); err != nil {
+			return err
+		}
+		return createAccountRecord(ctx, tx.Client(), account)
+	}
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := guardPoolProxyCapacity(txCtx, tx.Client(), account); err != nil {
+		return err
+	}
+	if err := createAccountRecord(txCtx, tx.Client(), account); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
@@ -485,6 +513,9 @@ func (r *accountRepository) updateAccount(
 		}
 	}
 
+	if err := guardPoolProxyCapacity(ctx, client, account); err != nil {
+		return err
+	}
 	updated, err := r.updateLockedAccount(
 		ctx,
 		client,

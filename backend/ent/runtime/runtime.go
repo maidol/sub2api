@@ -1729,6 +1729,14 @@ func init() {
 	proxy.DefaultExternalRef = proxyDescExternalRef.Default.(string)
 	// proxy.ExternalRefValidator is a validator for the "external_ref" field. It is called by the builders before save.
 	proxy.ExternalRefValidator = proxyDescExternalRef.Validators[0].(func(string) error)
+	// proxyDescPoolShareable is the schema descriptor for pool_shareable field.
+	proxyDescPoolShareable := proxyFields[13].Descriptor()
+	// proxy.DefaultPoolShareable holds the default value on creation for the pool_shareable field.
+	proxy.DefaultPoolShareable = proxyDescPoolShareable.Default.(bool)
+	// proxyDescPoolShareMax is the schema descriptor for pool_share_max field.
+	proxyDescPoolShareMax := proxyFields[14].Descriptor()
+	// proxy.DefaultPoolShareMax holds the default value on creation for the pool_share_max field.
+	proxy.DefaultPoolShareMax = proxyDescPoolShareMax.Default.(int)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.

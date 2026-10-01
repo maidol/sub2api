@@ -47,6 +47,10 @@ const (
 	FieldManagedBy = "managed_by"
 	// FieldExternalRef holds the string denoting the external_ref field in the database.
 	FieldExternalRef = "external_ref"
+	// FieldPoolShareable holds the string denoting the pool_shareable field in the database.
+	FieldPoolShareable = "pool_shareable"
+	// FieldPoolShareMax holds the string denoting the pool_share_max field in the database.
+	FieldPoolShareMax = "pool_share_max"
 	// EdgeAccounts holds the string denoting the accounts edge name in mutations.
 	EdgeAccounts = "accounts"
 	// EdgePrimaryProxies holds the string denoting the primary_proxies edge name in mutations.
@@ -91,6 +95,8 @@ var Columns = []string{
 	FieldExpiryWarnDays,
 	FieldManagedBy,
 	FieldExternalRef,
+	FieldPoolShareable,
+	FieldPoolShareMax,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -145,6 +151,10 @@ var (
 	DefaultExternalRef string
 	// ExternalRefValidator is a validator for the "external_ref" field. It is called by the builders before save.
 	ExternalRefValidator func(string) error
+	// DefaultPoolShareable holds the default value on creation for the "pool_shareable" field.
+	DefaultPoolShareable bool
+	// DefaultPoolShareMax holds the default value on creation for the "pool_share_max" field.
+	DefaultPoolShareMax int
 )
 
 // OrderOption defines the ordering options for the Proxy queries.
@@ -233,6 +243,16 @@ func ByManagedBy(opts ...sql.OrderTermOption) OrderOption {
 // ByExternalRef orders the results by the external_ref field.
 func ByExternalRef(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldExternalRef, opts...).ToFunc()
+}
+
+// ByPoolShareable orders the results by the pool_shareable field.
+func ByPoolShareable(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPoolShareable, opts...).ToFunc()
+}
+
+// ByPoolShareMax orders the results by the pool_share_max field.
+func ByPoolShareMax(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPoolShareMax, opts...).ToFunc()
 }
 
 // ByAccountsCount orders the results by accounts count.

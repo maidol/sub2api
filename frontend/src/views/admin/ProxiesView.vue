@@ -121,8 +121,14 @@
             />
           </template>
 
-          <template #cell-name="{ value }">
+          <template #cell-name="{ value, row }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <span
+              v-if="row.managed"
+              class="pool-badge ml-2 inline-flex items-center rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
+            >
+              {{ poolBadge(row) }}
+            </span>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -763,6 +769,27 @@
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
           <Select v-model="editForm.backup_proxy_id" :options="backupProxyOptions(editingProxy?.id)" />
         </div>
+        <div v-if="editingProxy?.managed" class="space-y-2 border-t border-gray-200 pt-4 dark:border-dark-600">
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="editForm.pool_shareable" type="checkbox" class="pool-shareable-input" />
+            {{ t('admin.proxies.pool.shareable') }}
+          </label>
+          <div>
+            <label class="input-label">{{ t('admin.proxies.pool.shareMax') }}</label>
+            <input
+              v-model.number="editForm.pool_share_max"
+              type="number"
+              min="0"
+              step="1"
+              class="input pool-share-max-input"
+              :disabled="!editForm.pool_shareable"
+            />
+            <p class="input-hint">{{ t('admin.proxies.pool.shareMaxHint') }}</p>
+            <p v-if="poolOverLimit(editingProxy) > 0" class="mt-1 text-xs text-amber-600">
+              {{ t('admin.proxies.pool.overLimit', { count: poolOverLimit(editingProxy) }) }}
+            </p>
+          </div>
+        </div>
 
       </form>
 
@@ -1153,6 +1180,8 @@ const editForm = reactive({
   fallback_mode: 'none' as 'none' | 'proxy' | 'direct',
   backup_proxy_id: null as number | null,
   expiry_warn_days: 7 as number,
+  pool_shareable: false as boolean,
+  pool_share_max: 0 as number,
 })
 
 const allProxiesForBackup = ref<Proxy[]>([])
@@ -1422,6 +1451,21 @@ const handleCreateProxy = async () => {
   }
 }
 
+// Badge for a pool-managed row: "Proxy pool" when it is not shared, otherwise
+// how many accounts use it against its limit.
+const poolBadge = (proxy: Proxy) => {
+  if (!proxy.pool_shareable) return t('admin.proxies.pool.managedBadge')
+  const max = proxy.pool_share_max ?? 0
+  return `${t('admin.proxies.pool.managedBadge')} · ${proxy.pool_used ?? 0}/${max > 0 ? max : '∞'}`
+}
+
+// Accounts above the slot's limit after the limit was lowered (they stay).
+const poolOverLimit = (proxy: Proxy | null) => {
+  if (!proxy || !editForm.pool_shareable) return 0
+  const max = Math.floor(Number(editForm.pool_share_max) || 0)
+  return max > 0 ? Math.max(0, (proxy.pool_used ?? 0) - max) : 0
+}
+
 const handleEdit = (proxy: Proxy) => {
   editingProxy.value = proxy
   editForm.name = proxy.name
@@ -1435,6 +1479,8 @@ const handleEdit = (proxy: Proxy) => {
   editForm.fallback_mode = proxy.fallback_mode || 'none'
   editForm.backup_proxy_id = proxy.backup_proxy_id ?? null
   editForm.expiry_warn_days = proxy.expiry_warn_days ?? 7
+  editForm.pool_shareable = proxy.pool_shareable ?? false
+  editForm.pool_share_max = proxy.pool_share_max ?? 0
   editPasswordVisible.value = false
   editPasswordDirty.value = false
   showEditModal.value = true
@@ -1475,6 +1521,11 @@ const handleUpdateProxy = async () => {
       fallback_mode: editForm.fallback_mode,
       backup_proxy_id: editForm.fallback_mode === 'proxy' ? editForm.backup_proxy_id : null,
       expiry_warn_days: editForm.expiry_warn_days,
+    }
+
+    if (editingProxy.value.managed) {
+      updateData.pool_shareable = editForm.pool_shareable
+      updateData.pool_share_max = Math.max(0, Math.floor(Number(editForm.pool_share_max) || 0))
     }
 
     // Only include password if user actually modified the field

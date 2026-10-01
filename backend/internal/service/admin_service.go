@@ -550,6 +550,8 @@ type UpdateProxyInput struct {
 	BackupProxyID  *int64
 	ClearBackupID  bool
 	ExpiryWarnDays *int
+	PoolShareable  *bool // pool-managed proxies only
+	PoolShareMax   *int  // pool-managed proxies only; >= 0
 }
 
 type GenerateRedeemCodesInput struct {

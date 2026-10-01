@@ -526,6 +526,7 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth
 		proxies.PUT("/pool/config", h.Admin.ProxyPool.UpdateConfig)
 		proxies.GET("/pool/health", h.Admin.ProxyPool.Health)
 		proxies.POST("/pool/lease", h.Admin.ProxyPool.Lease)
+		proxies.GET("/pool/shareable", h.Admin.ProxyPool.ListShareable)
 		proxies.POST("/:id/pool/rotate", h.Admin.ProxyPool.Rotate)
 		proxies.GET("/:id", h.Admin.Proxy.GetByID)
 		proxies.POST("", h.Admin.Proxy.Create)

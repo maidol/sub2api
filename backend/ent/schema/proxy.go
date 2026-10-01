@@ -70,6 +70,12 @@ func (Proxy) Fields() []ent.Field {
 		field.String("external_ref").
 			MaxLen(100).Default("").
 			Comment("Provider lease ID when managed_by is set."),
+		field.Bool("pool_shareable").
+			Default(false).
+			Comment("Pool-managed only: other accounts may share this slot."),
+		field.Int("pool_share_max").
+			Default(0).
+			Comment("Pool-managed only: max accounts on a shared slot; 0 = no limit."),
 	}
 }
 

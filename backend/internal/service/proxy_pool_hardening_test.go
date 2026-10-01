@@ -81,7 +81,7 @@ func TestProxyPoolLogsNeverContainALeaseID(t *testing.T) {
 	buf := captureLog(t)
 
 	// leased, rotated, and released as unused once it is old
-	p, err := svc.Lease(context.Background())
+	p, _, err := svc.Allocate(context.Background())
 	if err != nil {
 		t.Fatalf("Lease: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestProxyPoolLogsNeverContainALeaseID(t *testing.T) {
 	}
 	// an incomplete lease is logged and released
 	lease = strings.Replace(lease, `"password":"0123456789abcdef0123456789abcdef",`, "", 1)
-	if _, err := svc.Lease(context.Background()); err == nil {
+	if _, _, err := svc.Allocate(context.Background()); err == nil {
 		t.Fatal("incomplete lease: expected an error")
 	}
 

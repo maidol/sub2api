@@ -2141,6 +2141,10 @@ func (stubProxyRepo) CountExpiringSoon(ctx context.Context, now time.Time) (int6
 	return 0, nil
 }
 
+func (stubProxyRepo) GetPoolOccupancy(ctx context.Context) (map[int64]int64, error) {
+	return map[int64]int64{}, nil
+}
+
 type stubRedeemCodeRepo struct {
 	byUser map[int64][]service.RedeemCode
 }

@@ -694,7 +694,9 @@ func TestUpdateAccount_RejectsCredentialWriteToShadow(t *testing.T) {
 func TestBulkUpdateAccounts_PropagatesProxyToShadow(t *testing.T) {
 	ctx := context.Background()
 	repo := newSparkShadowRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo}
+	proxies := newPoolProxyRepo()
+	proxies.rows[99] = &Proxy{ID: 99, Name: "hand-made"}
+	svc := &adminServiceImpl{accountRepo: repo, proxyRepo: proxies}
 
 	oldProxy := int64(7)
 	parent := &Account{
@@ -1001,7 +1003,9 @@ func TestUpdateAccount_ShadowRejectsAuthCredentials(t *testing.T) {
 func TestBulkUpdateAccounts_RejectsProxyChangeOnShadow(t *testing.T) {
 	ctx := context.Background()
 	repo := newSparkShadowRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo}
+	proxies := newPoolProxyRepo()
+	proxies.rows[42] = &Proxy{ID: 42, Name: "hand-made"}
+	svc := &adminServiceImpl{accountRepo: repo, proxyRepo: proxies}
 	parentProxy := int64(7)
 	parent := &Account{
 		Name: "p", Platform: PlatformOpenAI, Type: AccountTypeOAuth,

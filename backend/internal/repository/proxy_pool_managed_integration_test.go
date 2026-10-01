@@ -61,3 +61,60 @@ func TestProxyPoolManagedFieldsRoundTrip(t *testing.T) {
 	}
 	require.True(t, found, "reconcile reads managed rows through ListAllForFallback")
 }
+
+// Migration 242: share settings default to "not shared, no limit" and survive
+// create, read and update.
+func TestProxyPoolShareFieldsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	repo := newProxyRepositoryWithSQL(tx.Client(), tx)
+
+	p := &service.Proxy{
+		Name: "Proxy pool · slot01", Protocol: "http", Host: "vpngate", Port: 20001,
+		Username: "slot01", Password: "0123456789abcdef0123456789abcdef", Status: service.StatusActive,
+		FallbackMode: service.FallbackModeNone, ExpiryWarnDays: 7,
+		ManagedBy: service.ProxyManagedByPool, ExternalRef: "l-share",
+	}
+	require.NoError(t, repo.Create(ctx, p))
+	got, err := repo.GetByID(ctx, p.ID)
+	require.NoError(t, err)
+	require.False(t, got.PoolShareable)
+	require.Equal(t, 0, got.PoolShareMax)
+
+	got.PoolShareable, got.PoolShareMax = true, 5
+	require.NoError(t, repo.Update(ctx, got))
+	again, err := repo.GetByID(ctx, p.ID)
+	require.NoError(t, err)
+	require.True(t, again.PoolShareable)
+	require.Equal(t, 5, again.PoolShareMax)
+}
+
+// Occupancy counts live accounts on pool-managed proxies only, and leaves
+// spark shadows out: a shadow always rides on its parent's proxy.
+func TestProxyPoolOccupancyExcludesShadowsAndDeleted(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	client := tx.Client()
+	repo := newProxyRepositoryWithSQL(client, tx)
+
+	pool := &service.Proxy{Name: "slot01", Protocol: "http", Host: "vpngate", Port: 20001, Status: service.StatusActive,
+		FallbackMode: service.FallbackModeNone, ExpiryWarnDays: 7, ManagedBy: service.ProxyManagedByPool, ExternalRef: "l-occ"}
+	require.NoError(t, repo.Create(ctx, pool))
+	plain := mustCreateProxy(t, client, &service.Proxy{Name: "hand-made"})
+
+	parent := mustCreateAccount(t, client, &service.Account{Name: "parent", ProxyID: &pool.ID})
+	mustCreateAccount(t, client, &service.Account{Name: "second", ProxyID: &pool.ID})
+	shadow := mustCreateAccount(t, client, &service.Account{Name: "shadow", ProxyID: &pool.ID})
+	_, err := client.ExecContext(ctx, "UPDATE accounts SET parent_account_id = $1, quota_dimension = 'spark' WHERE id = $2", parent.ID, shadow.ID)
+	require.NoError(t, err)
+	gone := mustCreateAccount(t, client, &service.Account{Name: "gone", ProxyID: &pool.ID})
+	_, err = client.ExecContext(ctx, "UPDATE accounts SET deleted_at = NOW() WHERE id = $1", gone.ID)
+	require.NoError(t, err)
+	mustCreateAccount(t, client, &service.Account{Name: "plain", ProxyID: &plain.ID})
+
+	occ, err := repo.GetPoolOccupancy(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), occ[pool.ID])
+	_, hasPlain := occ[plain.ID]
+	require.False(t, hasPlain, "hand-made proxies are not in the occupancy map")
+}

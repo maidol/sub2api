@@ -121,6 +121,9 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if input.ExpiryWarnDays != nil && *input.ExpiryWarnDays < 0 {
 		return nil, infraerrors.BadRequest("PROXY_WARN_DAYS_INVALID", "expiry_warn_days must be >= 0")
 	}
+	if input.PoolShareMax != nil && *input.PoolShareMax < 0 {
+		return nil, ErrProxyPoolShareMaxInvalid
+	}
 
 	if input.Name != "" {
 		proxy.Name = input.Name
@@ -150,6 +153,15 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	proxy.BackupProxyID = backupID
 	if input.ExpiryWarnDays != nil {
 		proxy.ExpiryWarnDays = *input.ExpiryWarnDays
+	}
+	// Share settings mean nothing on a hand-made proxy; ignore them there.
+	if proxy.ManagedBy == ProxyManagedByPool {
+		if input.PoolShareable != nil {
+			proxy.PoolShareable = *input.PoolShareable
+		}
+		if input.PoolShareMax != nil {
+			proxy.PoolShareMax = *input.PoolShareMax
+		}
 	}
 
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {

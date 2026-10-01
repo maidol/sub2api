@@ -12,6 +12,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,6 +96,9 @@ type ProxyPoolConfigView struct {
 	URLSource       string `json:"url_source"`   // "setting", "env" or ""
 	TokenSource     string `json:"token_source"` // "setting", "env" or ""
 	TokenConfigured bool   `json:"token_configured"`
+	// Share settings a newly leased slot starts with.
+	DefaultShareable bool `json:"default_shareable"`
+	DefaultShareMax  int  `json:"default_share_max"`
 }
 
 func (s *ProxyPoolService) settingValue(ctx context.Context, key string) (string, error) {
@@ -135,7 +140,47 @@ func (s *ProxyPoolService) resolve(ctx context.Context) (baseURL, token string, 
 // GetConfig returns the effective configuration without the token.
 func (s *ProxyPoolService) GetConfig(ctx context.Context) (ProxyPoolConfigView, error) {
 	_, _, view, err := s.resolve(ctx)
+	if err != nil {
+		return view, err
+	}
+	view.DefaultShareable, view.DefaultShareMax, err = s.shareDefaults(ctx)
 	return view, err
+}
+
+// shareDefaults returns the share settings a newly leased slot starts with.
+func (s *ProxyPoolService) shareDefaults(ctx context.Context) (bool, int, error) {
+	shareable, err := s.settingValue(ctx, SettingKeyProxyPoolDefaultShareable)
+	if err != nil {
+		return false, 0, err
+	}
+	rawMax, err := s.settingValue(ctx, SettingKeyProxyPoolDefaultShareMax)
+	if err != nil {
+		return false, 0, err
+	}
+	shareMax, _ := strconv.Atoi(rawMax)
+	if shareMax < 0 {
+		shareMax = 0
+	}
+	return shareable == "true", shareMax, nil
+}
+
+// UpdateShareDefaults saves the share settings for newly leased slots; nil
+// keeps a value. Existing slots are not changed.
+func (s *ProxyPoolService) UpdateShareDefaults(ctx context.Context, shareable *bool, shareMax *int) error {
+	if shareMax != nil && *shareMax < 0 {
+		return ErrProxyPoolShareMaxInvalid
+	}
+	if shareable != nil {
+		if err := s.settingRepo.Set(ctx, SettingKeyProxyPoolDefaultShareable, strconv.FormatBool(*shareable)); err != nil {
+			return err
+		}
+	}
+	if shareMax != nil {
+		if err := s.settingRepo.Set(ctx, SettingKeyProxyPoolDefaultShareMax, strconv.Itoa(*shareMax)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateConfig saves the UI values. url == "" removes the saved URL (the
@@ -278,8 +323,40 @@ func (s *ProxyPoolService) Health(ctx context.Context) (map[string]any, error) {
 	return out, nil
 }
 
-// Lease leases a new proxy and stores it as a pool-managed Proxy row.
-func (s *ProxyPoolService) Lease(ctx context.Context) (*Proxy, error) {
+// Allocate gives an account a pool proxy: a newly leased slot when the
+// provider has one, otherwise the least used shared slot that still has room
+// (shared = true). The room is only a hint; saving the account enforces the
+// limit under a row lock.
+func (s *ProxyPoolService) Allocate(ctx context.Context) (*Proxy, bool, error) {
+	proxy, err := s.leaseNew(ctx)
+	if err == nil {
+		return proxy, false, nil
+	}
+	if !errors.Is(err, ErrProxyPoolExhausted) && !errors.Is(err, ErrProxyPoolNoHealthyNode) {
+		return nil, false, err
+	}
+	candidates, listErr := s.ListShareable(ctx)
+	if listErr != nil {
+		return nil, false, listErr
+	}
+	if len(candidates) == 0 {
+		if errors.Is(err, ErrProxyPoolNoHealthyNode) {
+			return nil, false, err // the slots are free; the exit nodes are not
+		}
+		return nil, false, ErrProxyPoolNoCapacity
+	}
+	picked := candidates[0].Proxy
+	log.Printf("[ProxyPool] sharing proxy %d (%d accounts)", picked.ID, candidates[0].Used)
+	return &picked, true, nil
+}
+
+// leaseNew leases a new proxy and stores it as a pool-managed Proxy row with
+// the default share settings.
+func (s *ProxyPoolService) leaseNew(ctx context.Context) (*Proxy, error) {
+	shareable, shareMax, err := s.shareDefaults(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var l proxyPoolLease
 	status, code, err := s.call(ctx, http.MethodPost, "/v1/leases",
 		map[string]string{"client_ref": s.newRef(), "protocol": "http"}, &l)
@@ -307,6 +384,8 @@ func (s *ProxyPoolService) Lease(ctx context.Context) (*Proxy, error) {
 		ExpiryWarnDays: 7,
 		ManagedBy:      ProxyManagedByPool,
 		ExternalRef:    l.LeaseID,
+		PoolShareable:  shareable,
+		PoolShareMax:   shareMax,
 	}
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
 		s.release(ctx, l.LeaseID)
@@ -314,6 +393,38 @@ func (s *ProxyPoolService) Lease(ctx context.Context) (*Proxy, error) {
 	}
 	log.Printf("[ProxyPool] leased proxy %d (%s)", proxy.ID, l.Node)
 	return proxy, nil
+}
+
+// ListShareable returns the shared pool proxies that still have room, least
+// used first (ties: lowest id).
+func (s *ProxyPoolService) ListShareable(ctx context.Context) ([]ProxyPoolShareCandidate, error) {
+	all, err := s.proxyRepo.ListAllForFallback(ctx)
+	if err != nil {
+		return nil, err
+	}
+	occupancy, err := s.proxyRepo.GetPoolOccupancy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProxyPoolShareCandidate, 0)
+	for i := range all {
+		p := all[i]
+		if p.ManagedBy != ProxyManagedByPool || !p.PoolShareable {
+			continue
+		}
+		used := occupancy[p.ID]
+		if capacity, limited := p.PoolCapacity(); limited && used >= capacity {
+			continue
+		}
+		out = append(out, ProxyPoolShareCandidate{Proxy: p, Used: used})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Used != out[j].Used {
+			return out[i].Used < out[j].Used
+		}
+		return out[i].Proxy.ID < out[j].Proxy.ID
+	})
+	return out, nil
 }
 
 // Rotate moves a pool-managed proxy to another exit node and returns the new

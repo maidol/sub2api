@@ -450,12 +450,15 @@ type Proxy struct {
 	ExpiryWarnDays int        `json:"expiry_warn_days"`
 	// Managed is true for a proxy leased from the proxy pool: it belongs to
 	// the account that leased it and must not be offered to other accounts.
-	Managed bool `json:"managed"`
+	Managed       bool `json:"managed"`
+	PoolShareable bool `json:"pool_shareable"`
+	PoolShareMax  int  `json:"pool_share_max"`
 }
 
 type ProxyWithAccountCount struct {
 	Proxy
 	AccountCount   int64  `json:"account_count"`
+	PoolUsed       int64  `json:"pool_used"`
 	LatencyMs      *int64 `json:"latency_ms,omitempty"`
 	LatencyStatus  string `json:"latency_status,omitempty"`
 	LatencyMessage string `json:"latency_message,omitempty"`
@@ -482,6 +485,7 @@ type AdminProxy struct {
 type AdminProxyWithAccountCount struct {
 	AdminProxy
 	AccountCount   int64  `json:"account_count"`
+	PoolUsed       int64  `json:"pool_used"`
 	LatencyMs      *int64 `json:"latency_ms,omitempty"`
 	LatencyStatus  string `json:"latency_status,omitempty"`
 	LatencyMessage string `json:"latency_message,omitempty"`
@@ -820,4 +824,18 @@ type PromoCodeUsage struct {
 	UsedAt      time.Time `json:"used_at"`
 
 	User *User `json:"user,omitempty"`
+}
+
+// ProxyPoolAllocation is a pool proxy given to an account; Shared is true when
+// it is an existing shared slot rather than a newly leased one.
+type ProxyPoolAllocation struct {
+	Proxy
+	Shared bool `json:"shared"`
+}
+
+// ProxyPoolShareCandidate is a shared pool slot that still has room.
+type ProxyPoolShareCandidate struct {
+	Proxy Proxy `json:"proxy"`
+	Used  int64 `json:"used"`
+	Max   int   `json:"max"`
 }

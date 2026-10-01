@@ -114,7 +114,7 @@ export default {
       searchProxies: '搜索代理...',
       pool: {
         option: '代理池（自动分配）',
-        optionHint: '从代理池为该账号租一个独占出口',
+        optionHint: '优先为该账号租一个独占出口；slot 用完时分配到可共享的 slot',
         leasing: '正在从代理池租用代理…',
         leased: '已租到 {name}，保存账号后生效',
         leaseFailed: '从代理池租用代理失败',
@@ -142,7 +142,18 @@ export default {
         testOk: '提供方可用：已租出 {leased}/{slots}，节点 {nodes} 个',
         testFailed: '无法连接提供方',
         saved: '代理池设置已保存',
-        saveFailed: '保存代理池设置失败'
+        saveFailed: '保存代理池设置失败',
+        sharedGroup: '可共享的代理池 slot',
+        sharedPicked: '已选择共享 slot：{name}（{usage}），保存账号后生效',
+        leasedShared: '代理池已满，已分配到共享 slot：{name}，保存账号后生效',
+        rotateSharedConfirm: '该 slot 允许共享，更换出口会影响所有使用它的账号。继续吗？',
+        shareable: '允许其他账号共享这个 slot',
+        shareMax: '最大账号数',
+        shareMaxHint: '包括第一个使用它的账号；0 表示不限',
+        overLimit: '当前超出上限 {count} 个账号：已有账号不受影响，但不再接纳新账号',
+        defaultShareable: '新租的 slot 默认允许共享',
+        defaultShareMax: '新 slot 默认最大账号数',
+        bulkUnsupported: '批量编辑暂不支持选择代理池代理，请在单个账号里选择'
       },
       protocols: {
         http: 'HTTP',

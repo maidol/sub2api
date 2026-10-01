@@ -960,6 +960,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(input.Extra, OpenCodeGoUsageSnapshotExtraKey)
 
+	// Pool slots have per-slot account limits that a bulk write would skip.
+	if input.ProxyID != nil && *input.ProxyID > 0 {
+		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
+		if err != nil {
+			return nil, err
+		}
+		if proxy.ManagedBy == ProxyManagedByPool {
+			return nil, ErrProxyPoolBulkUnsupported
+		}
+	}
+
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
 		if err != nil {

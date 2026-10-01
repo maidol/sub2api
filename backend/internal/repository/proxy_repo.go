@@ -55,7 +55,8 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 		builder.SetBackupProxyID(*proxyIn.BackupProxyID)
 	}
 	if proxyIn.ManagedBy != "" {
-		builder.SetManagedBy(proxyIn.ManagedBy).SetExternalRef(proxyIn.ExternalRef)
+		builder.SetManagedBy(proxyIn.ManagedBy).SetExternalRef(proxyIn.ExternalRef).
+			SetPoolShareable(proxyIn.PoolShareable).SetPoolShareMax(proxyIn.PoolShareMax)
 	}
 
 	created, err := builder.Save(ctx)
@@ -158,7 +159,9 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 		SetPort(proxyIn.Port).
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
-		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+		SetExpiryWarnDays(proxyIn.ExpiryWarnDays).
+		SetPoolShareable(proxyIn.PoolShareable).
+		SetPoolShareMax(proxyIn.PoolShareMax)
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	} else {
@@ -397,6 +400,10 @@ func (r *proxyRepository) buildProxyWithAccountCountResult(ctx context.Context, 
 	if err != nil {
 		return nil, nil, err
 	}
+	occupancy, err := r.GetPoolOccupancy(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	result := make([]service.ProxyWithAccountCount, 0, len(proxies))
 	for i := range proxies {
@@ -407,6 +414,7 @@ func (r *proxyRepository) buildProxyWithAccountCountResult(ctx context.Context, 
 		result = append(result, service.ProxyWithAccountCount{
 			Proxy:        *proxyOut,
 			AccountCount: counts[proxyOut.ID],
+			PoolUsed:     occupancy[proxyOut.ID],
 		})
 	}
 
@@ -484,6 +492,34 @@ func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID in
 		return 0, err
 	}
 	return count, nil
+}
+
+// poolOccupancySQL counts live accounts per pool-managed proxy. Spark shadows
+// (parent_account_id set) always follow their parent's proxy and do not take
+// a place of their own.
+const poolOccupancySQL = `
+	SELECT p.id, COUNT(a.id)
+	FROM proxies p
+	LEFT JOIN accounts a
+		ON a.proxy_id = p.id AND a.deleted_at IS NULL AND a.parent_account_id IS NULL
+	WHERE p.managed_by = 'pool' AND p.deleted_at IS NULL
+	GROUP BY p.id`
+
+func (r *proxyRepository) GetPoolOccupancy(ctx context.Context) (map[int64]int64, error) {
+	rows, err := r.sql.QueryContext(ctx, poolOccupancySQL)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var id, n int64
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }
 
 func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]service.ProxyAccountSummary, error) {
@@ -570,6 +606,10 @@ func (r *proxyRepository) ListActiveWithAccountCount(ctx context.Context) ([]ser
 	if err != nil {
 		return nil, err
 	}
+	occupancy, err := r.GetPoolOccupancy(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Build result with account counts
 	result := make([]service.ProxyWithAccountCount, 0, len(proxies))
@@ -581,6 +621,7 @@ func (r *proxyRepository) ListActiveWithAccountCount(ctx context.Context) ([]ser
 		result = append(result, service.ProxyWithAccountCount{
 			Proxy:        *proxyOut,
 			AccountCount: counts[proxyOut.ID],
+			PoolUsed:     occupancy[proxyOut.ID],
 		})
 	}
 
@@ -606,6 +647,8 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		ExpiryWarnDays: m.ExpiryWarnDays,
 		ManagedBy:      m.ManagedBy,
 		ExternalRef:    m.ExternalRef,
+		PoolShareable:  m.PoolShareable,
+		PoolShareMax:   m.PoolShareMax,
 	}
 	if m.Username != nil {
 		out.Username = *m.Username
