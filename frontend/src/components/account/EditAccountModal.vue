@@ -1648,7 +1648,7 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" allow-pool />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" allow-pool @leased="emit('proxyLeased', $event)" />
       </div>
 
       <UpstreamRequestIdHeaderField
@@ -3212,6 +3212,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
+  proxyLeased: [proxy: Proxy]
 }>()
 
 const { t } = useI18n()

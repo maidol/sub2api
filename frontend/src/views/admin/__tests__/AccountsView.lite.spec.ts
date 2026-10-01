@@ -79,8 +79,15 @@ const AccountGroupsCellStub = defineComponent({
 })
 
 const EditAccountModalStub = defineComponent({
-  props: { show: Boolean, account: { type: Object, default: null } },
+  name: 'EditAccountModal',
+  props: { show: Boolean, account: { type: Object, default: null }, proxies: { type: Array, default: () => [] } },
   template: '<div data-test="edit-account">{{ show ? account?.name : "" }}</div>'
+})
+
+const CreateAccountModalStub = defineComponent({
+  name: 'CreateAccountModal',
+  props: { show: Boolean, proxies: { type: Array, default: () => [] } },
+  template: '<div data-test="create-account" />'
 })
 
 const AccountTestModalStub = defineComponent({
@@ -116,7 +123,7 @@ function mountView(stubActionMenu = true) {
         TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
-        CreateAccountModal: true,
+        CreateAccountModal: CreateAccountModalStub,
         EditAccountModal: EditAccountModalStub,
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
@@ -276,6 +283,27 @@ describe('admin AccountsView lite account list', () => {
     expect(refreshCredentials).toHaveBeenCalledWith(42)
     expect(wrapper.get('[data-account-name]').attributes('data-account-name')).toBe('refreshed account')
     expect(showWarning).toHaveBeenCalledWith('Token refreshed, but project_id is temporarily unavailable')
+    wrapper.unmount()
+  })
+
+  it('adds a proxy leased from the pool to the list both account modals receive', async () => {
+    const plain = { id: 1, name: 'hand-made', protocol: 'http', host: 'h', port: 8080, managed: false }
+    const leased = { id: 9, name: 'Proxy pool · slot01', protocol: 'http', host: 'vpngate', port: 20001, managed: true }
+    getAllProxies.mockResolvedValue([plain])
+    const wrapper = mountView()
+    await flushPromises()
+
+    const edit = wrapper.findComponent(EditAccountModalStub)
+    const create = wrapper.findComponent(CreateAccountModalStub)
+    edit.vm.$emit('proxy-leased', leased)
+    await flushPromises()
+    expect(edit.props('proxies')).toEqual([plain, leased])
+    expect(create.props('proxies')).toEqual([plain, leased])
+
+    // A second lease event for the same proxy does not duplicate it.
+    create.vm.$emit('proxy-leased', leased)
+    await flushPromises()
+    expect(edit.props('proxies')).toEqual([plain, leased])
     wrapper.unmount()
   })
 

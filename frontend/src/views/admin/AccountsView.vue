@@ -450,8 +450,8 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" @proxy-leased="handleProxyLeased" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @proxy-leased="handleProxyLeased" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
@@ -2246,6 +2246,13 @@ const handleProbeUpstreamBilling = async (account: Account) => {
     appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
   } finally {
     probingUpstreamBilling.delete(account.id)
+  }
+}
+// A proxy leased from the pool inside a modal is not in the list loaded on
+// mount; without it, reopening the account shows "no proxy" for its proxy_id.
+const handleProxyLeased = (proxy: AccountProxy) => {
+  if (!proxies.value.some((p) => p.id === proxy.id)) {
+    proxies.value = [...proxies.value, proxy]
   }
 }
 const handleAccountUpdated = (updatedAccount: Account) => {
