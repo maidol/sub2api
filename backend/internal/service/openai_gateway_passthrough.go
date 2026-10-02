@@ -1655,7 +1655,19 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 		}
 		return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, accountHeaders, payload, model)
 	default:
-		return statusCode, false
+		transientStatus := openAIWSPayloadTransientStatus(payload)
+		if transientStatus == 0 {
+			return statusCode, false
+		}
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		model := firstNonEmpty(canonicalModel...)
+		if model == "" {
+			model = firstNonEmpty(gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
+		}
+		return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, transientStatus, headers, payload, model)
 	}
 }
 
