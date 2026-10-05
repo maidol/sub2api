@@ -435,6 +435,15 @@ func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	return svc
 }
 
+// ProvideProxyHealthProbeService creates and starts the connectivity probe worker.
+func ProvideProxyHealthProbeService(cfg *config.Config, proxyRepo ProxyRepository, adminService AdminService) *ProxyHealthProbeService {
+	interval := time.Duration(cfg.ProxyHealthProbeIntervalMinutes) * time.Minute
+	timeout := proxyHealthProbeTimeout(len(cfg.Security.ProxyProbe.URLs))
+	svc := NewProxyHealthProbeService(proxyRepo, adminService, interval, timeout)
+	svc.Start()
+	return svc
+}
+
 // ProvideProxyPoolService creates ProxyPoolService and starts its reconcile
 // loop. PROXY_POOL_URL / PROXY_POOL_TOKEN are the fallback when the admin UI
 // has not saved a provider.
@@ -951,6 +960,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpenAICodexVersionSyncService,
 	ProvideClaudeCodeVersionSyncService,
 	ProvideProxyExpiryService,
+	ProvideProxyHealthProbeService,
 	ProvideProxyPoolService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,

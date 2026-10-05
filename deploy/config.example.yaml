@@ -108,6 +108,10 @@ simple_mode:
 # Enforce API-key 5h/1d/7d spending windows in simple mode; other billing stays disabled.
 simple_mode_key_rate_limit_enabled: false
 
+# Background proxy connectivity probe interval in minutes; <= 0 disables it.
+# 后台代理连通性探测间隔（分钟）；<= 0 禁用。
+proxy_health_probe_interval_minutes: 10
+
 # =============================================================================
 # CORS Configuration
 # 跨域资源共享 (CORS) 配置

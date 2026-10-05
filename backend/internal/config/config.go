@@ -109,6 +109,8 @@ type Config struct {
 
 	// Enforce only API-key spending windows in simple mode.
 	SimpleModeKeyRateLimitEnabled bool `mapstructure:"simple_mode_key_rate_limit_enabled" yaml:"simple_mode_key_rate_limit_enabled"`
+
+	ProxyHealthProbeIntervalMinutes int `mapstructure:"proxy_health_probe_interval_minutes"`
 }
 
 // SimpleModeConfig controls startup behavior in simple mode.
@@ -2042,6 +2044,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
+	viper.SetDefault("proxy_health_probe_interval_minutes", 10)
 	viper.SetDefault("simple_mode.auto_create_default_groups", true)
 	viper.SetDefault("simple_mode_key_rate_limit_enabled", false)
 

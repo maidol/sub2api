@@ -533,9 +533,9 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 	s.saveProxyLatency(ctx, proxyID, info)
 }
 
-func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) {
+func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) error {
 	if s.proxyProber == nil || proxy == nil {
-		return
+		return nil
 	}
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxy.URL())
 	if err != nil {
@@ -544,7 +544,7 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 			Message:   err.Error(),
 			UpdatedAt: time.Now(),
 		})
-		return
+		return err
 	}
 
 	latency := latencyMs
@@ -559,6 +559,11 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 		City:        exitInfo.City,
 		UpdatedAt:   time.Now(),
 	})
+	return nil
+}
+
+func (s *adminServiceImpl) ProbeProxyLatency(ctx context.Context, proxy *Proxy) error {
+	return s.probeProxyLatency(ctx, proxy)
 }
 
 func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []ProxyWithAccountCount) {
