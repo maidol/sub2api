@@ -455,6 +455,17 @@ type Proxy struct {
 	PoolShareMax  int  `json:"pool_share_max"`
 }
 
+// ProxyHealth is the cached connectivity and quality summary attached to account-list rows.
+type ProxyHealth struct {
+	LatencyStatus  string `json:"latency_status"`
+	LatencyMs      *int64 `json:"latency_ms,omitempty"`
+	LatencyMessage string `json:"latency_message,omitempty"`
+	CountryCode    string `json:"country_code,omitempty"`
+	QualityStatus  string `json:"quality_status,omitempty"`
+	QualitySummary string `json:"quality_summary,omitempty"`
+	CheckedAt      *int64 `json:"checked_at,omitempty"`
+}
+
 type ProxyWithAccountCount struct {
 	Proxy
 	AccountCount   int64  `json:"account_count"`

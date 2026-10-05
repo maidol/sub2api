@@ -330,11 +330,55 @@
             <div class="flex flex-col gap-1">
               <div v-if="row.proxy" class="flex items-center gap-2">
                 <span class="text-sm text-gray-700 dark:text-gray-300">{{ row.proxy.name }}</span>
-                <span v-if="row.proxy.country_code" class="text-xs text-gray-500 dark:text-gray-400">
-                  ({{ row.proxy.country_code }})
+                <span v-if="row.proxy_health?.country_code" class="text-xs text-gray-500 dark:text-gray-400">
+                  ({{ row.proxy_health.country_code }})
                 </span>
               </div>
               <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+              <div
+                v-if="row.proxy && (row.proxy.status === 'inactive' || row.proxy_health)"
+                class="flex flex-wrap items-center gap-1"
+              >
+                <span
+                  v-if="row.proxy.status === 'inactive'"
+                  class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200"
+                  :title="t('admin.accounts.proxyHealth.proxyDisabled')"
+                >
+                  {{ t('admin.accounts.proxyHealth.proxyDisabled') }}
+                </span>
+                <HelpTooltip
+                  v-if="row.proxy_health?.latency_status === 'failed'"
+                  :content="row.proxy_health.latency_message || t('admin.accounts.proxyHealth.tooltip')"
+                >
+                  <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
+                    {{ t('admin.accounts.proxyHealth.connectionFailed') }}
+                  </span>
+                </HelpTooltip>
+                <HelpTooltip
+                  v-if="row.proxy_health?.quality_status === 'warn'"
+                  :content="row.proxy_health.quality_summary || t('admin.accounts.proxyHealth.tooltip')"
+                >
+                  <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
+                    {{ t('admin.accounts.proxyHealth.qualityWarn') }}
+                  </span>
+                </HelpTooltip>
+                <HelpTooltip
+                  v-if="row.proxy_health?.quality_status === 'challenge' || row.proxy_health?.quality_status === 'failed'"
+                  :content="row.proxy_health.quality_summary || t('admin.accounts.proxyHealth.tooltip')"
+                >
+                  <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
+                    {{ t('admin.accounts.proxyHealth.qualityAbnormal') }}
+                  </span>
+                </HelpTooltip>
+              </div>
+              <div v-if="row.proxy" class="text-xs text-gray-500 dark:text-gray-400">
+                <span v-if="row.proxy_health?.checked_at != null" :title="t('admin.accounts.proxyHealth.tooltip')">
+                  {{ t('admin.accounts.proxyHealth.label') }}: {{ formatProxyHealthCheckedAt(row.proxy_health.checked_at) }}
+                </span>
+                <span v-else>
+                  {{ t('admin.accounts.proxyHealth.notChecked') }}
+                </span>
+              </div>
               <div v-if="row.proxy && row.proxy.expires_at" class="flex items-center gap-2 text-xs">
                 <span class="text-gray-600 dark:text-gray-300">{{ formatDateTime(row.proxy.expires_at) }}</span>
                 <span :class="proxyExpiryBadge(row.proxy)">{{ proxyExpiryText(row.proxy) }}</span>
@@ -1387,6 +1431,20 @@ const inAutoRefreshSilentWindow = () => {
   return Date.now() < autoRefreshSilentUntil.value
 }
 
+const buildProxyHealthRefreshKey = (account: Pick<Account, 'proxy_health'>) => {
+  const health = account.proxy_health
+  if (health == null) return null
+  return JSON.stringify([
+    health.latency_status,
+    health.latency_ms,
+    health.latency_message,
+    health.country_code,
+    health.quality_status,
+    health.quality_summary,
+    health.checked_at
+  ])
+}
+
 const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
   return (
     current.updated_at !== next.updated_at ||
@@ -1399,7 +1457,8 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.overload_until !== next.overload_until ||
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
     buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next) ||
-    buildGrokUsageRefreshKey(current) !== buildGrokUsageRefreshKey(next)
+    buildGrokUsageRefreshKey(current) !== buildGrokUsageRefreshKey(next) ||
+    buildProxyHealthRefreshKey(current) !== buildProxyHealthRefreshKey(next)
   )
 }
 
@@ -2184,6 +2243,12 @@ const accountMatchesCurrentFilters = (account: Account) => {
 }
 const mergeRuntimeFields = (oldAccount: Account, updatedAccount: Account): Account => ({
   ...updatedAccount,
+  ...(updatedAccount.proxy_health === undefined &&
+  oldAccount.proxy_id != null &&
+  oldAccount.proxy_id === updatedAccount.proxy_id &&
+  oldAccount.proxy_health !== undefined
+    ? { proxy_health: oldAccount.proxy_health }
+    : {}),
   current_concurrency: updatedAccount.current_concurrency ?? oldAccount.current_concurrency,
   current_window_cost: updatedAccount.current_window_cost ?? oldAccount.current_window_cost,
   active_sessions: updatedAccount.active_sessions ?? oldAccount.active_sessions
@@ -2506,6 +2571,17 @@ const proxyExpiryBadge = (p: AccountProxy): string => proxyExpiryBadgeClass(p.ex
 const proxyExpiryText = (p: AccountProxy): string => {
   const { key, params } = proxyExpiryLabelKey(p.expires_at, p.status)
   return params ? t(key, params) : t(key)
+}
+
+const formatProxyHealthCheckedAt = (checkedAt: number): string => {
+  const elapsedSeconds = Math.max(0, Math.floor(Date.now() / 1000 - checkedAt))
+  if (elapsedSeconds < 60 * 60) {
+    return t('admin.accounts.proxyHealth.minutesAgo', { count: Math.floor(elapsedSeconds / 60) })
+  }
+  if (elapsedSeconds < 24 * 60 * 60) {
+    return t('admin.accounts.proxyHealth.hoursAgo', { count: Math.floor(elapsedSeconds / (60 * 60)) })
+  }
+  return t('admin.accounts.proxyHealth.daysAgo', { count: Math.floor(elapsedSeconds / (24 * 60 * 60)) })
 }
 
 // 表格滚动时关闭行操作菜单，并让顶部工具菜单继续贴紧触发按钮。

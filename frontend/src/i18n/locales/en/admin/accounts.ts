@@ -375,6 +375,18 @@ export default {
         batchCompleted: 'Probed {count} account(s)',
         batchPartial: 'Probe partially completed: {success} succeeded, {failed} failed'
       },
+      proxyHealth: {
+        label: 'Proxy health',
+        proxyDisabled: 'Proxy inactive',
+        connectionFailed: 'Connection failed',
+        qualityWarn: 'Quality warning',
+        qualityAbnormal: 'Quality abnormal',
+        notChecked: 'Not checked',
+        tooltip: 'Latest proxy health check details',
+        minutesAgo: '{count} minutes ago',
+        hoursAgo: '{count} hours ago',
+        daysAgo: '{count} days ago'
+      },
       allPrivacyModes: 'All Privacy States',
       privacyUnset: 'Unset',
       privacyTrainingOff: 'Training data sharing disabled',

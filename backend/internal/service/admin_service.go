@@ -121,6 +121,7 @@ type AdminService interface {
 	GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error)
 	GetProxy(ctx context.Context, id int64) (*Proxy, error)
 	GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error)
+	GetProxyLatencies(ctx context.Context, ids []int64) (map[int64]*ProxyLatencyInfo, error)
 	CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error)
 	UpdateProxy(ctx context.Context, id int64, input *UpdateProxyInput) (*Proxy, error)
 	DeleteProxy(ctx context.Context, id int64) error

@@ -20,6 +20,10 @@ type stubAdminService struct {
 	openAISchedulerScorePoolCalls       int
 	proxies                             []service.Proxy
 	proxyCounts                         []service.ProxyWithAccountCount
+	proxyLatencies                      map[int64]*service.ProxyLatencyInfo
+	proxyLatenciesErr                   error
+	getProxyLatenciesCalls              int
+	lastGetProxyLatenciesIDs            []int64
 	redeems                             []service.RedeemCode
 	boundAuthIdentity                   *service.AdminBindAuthIdentityInput
 	boundAuthIdentityFor                int64
@@ -629,6 +633,12 @@ func (s *stubAdminService) GetProxy(ctx context.Context, id int64) (*service.Pro
 	}
 	proxy := service.Proxy{ID: id, Name: "proxy", Status: service.StatusActive}
 	return &proxy, nil
+}
+
+func (s *stubAdminService) GetProxyLatencies(ctx context.Context, ids []int64) (map[int64]*service.ProxyLatencyInfo, error) {
+	s.getProxyLatenciesCalls++
+	s.lastGetProxyLatenciesIDs = append([]int64(nil), ids...)
+	return s.proxyLatencies, s.proxyLatenciesErr
 }
 
 func (s *stubAdminService) GetProxiesByIDs(ctx context.Context, ids []int64) ([]service.Proxy, error) {

@@ -216,6 +216,7 @@ type AccountWithConcurrency struct {
 	ActiveSessions     *int                         `json:"active_sessions,omitempty"`      // 当前活跃会话数
 	CurrentRPM         *int                         `json:"current_rpm,omitempty"`          // 当前分钟 RPM 计数
 	UpstreamErrorCount *service.UpstreamErrorCounts `json:"upstream_error_count,omitempty"` // 最近五分钟上游 4xx/5xx
+	ProxyHealth        *dto.ProxyHealth             `json:"proxy_health,omitempty"`
 }
 
 // AccountListItemWithConcurrency is the compact account-list envelope used
@@ -231,6 +232,7 @@ type AccountListItemWithConcurrency struct {
 	ActiveSessions     *int                             `json:"active_sessions,omitempty"`
 	CurrentRPM         *int                             `json:"current_rpm,omitempty"`
 	UpstreamErrorCount *service.UpstreamErrorCounts     `json:"upstream_error_count,omitempty"`
+	ProxyHealth        *dto.ProxyHealth                 `json:"proxy_health,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -658,6 +660,40 @@ func (h *AccountHandler) listAccountSchedulerScoreFilterPool(
 	return accounts
 }
 
+func proxyHealthForAccount(account *service.Account, healthByProxyID map[int64]*dto.ProxyHealth) *dto.ProxyHealth {
+	if account == nil || account.ProxyID == nil {
+		return nil
+	}
+	return healthByProxyID[*account.ProxyID]
+}
+
+func proxyHealthFromLatencyInfo(info *service.ProxyLatencyInfo) *dto.ProxyHealth {
+	if info == nil {
+		return nil
+	}
+
+	status := "failed"
+	var latencyMs *int64
+	if info.Success {
+		status = "success"
+		latencyMs = info.LatencyMs
+	}
+
+	health := &dto.ProxyHealth{
+		LatencyStatus:  status,
+		LatencyMs:      latencyMs,
+		LatencyMessage: info.Message,
+		CountryCode:    info.CountryCode,
+		QualityStatus:  info.QualityStatus,
+		QualitySummary: info.QualitySummary,
+	}
+	if !info.UpdatedAt.IsZero() {
+		checkedAt := info.UpdatedAt.Unix()
+		health.CheckedAt = &checkedAt
+	}
+	return health
+}
+
 // List handles listing all accounts with pagination
 // GET /api/v1/admin/accounts
 func (h *AccountHandler) List(c *gin.Context) {
@@ -716,6 +752,33 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), accountPointers); err != nil {
 				response.ErrorFrom(c, err)
 				return
+			}
+		}
+	}
+
+	proxyHealthByID := make(map[int64]*dto.ProxyHealth)
+	proxyIDs := make([]int64, 0, len(accounts))
+	seenProxyIDs := make(map[int64]struct{}, len(accounts))
+	for i := range accounts {
+		if accounts[i].ProxyID == nil {
+			continue
+		}
+		proxyID := *accounts[i].ProxyID
+		if _, seen := seenProxyIDs[proxyID]; seen {
+			continue
+		}
+		seenProxyIDs[proxyID] = struct{}{}
+		proxyIDs = append(proxyIDs, proxyID)
+	}
+	if len(proxyIDs) > 0 {
+		latencies, latencyErr := h.adminService.GetProxyLatencies(c.Request.Context(), proxyIDs)
+		if latencyErr != nil {
+			slog.Warn("account_list_proxy_health_cache_failed", "error", latencyErr)
+		} else {
+			for proxyID, info := range latencies {
+				if info != nil {
+					proxyHealthByID[proxyID] = proxyHealthFromLatencyInfo(info)
+				}
 			}
 		}
 	}
@@ -841,6 +904,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 			SchedulerScore:     schedulerScores[acc.ID],
 			SchedulerScores:    schedulerGroupScores[acc.ID],
 			Gemini38Scheduler:  gemini38SchedulerStatus(acc),
+			ProxyHealth:        proxyHealthForAccount(acc, proxyHealthByID),
 		}
 		if counts, ok := upstreamErrorCounts[acc.ID]; ok {
 			item.UpstreamErrorCount = &counts
@@ -886,6 +950,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				ActiveSessions:     item.ActiveSessions,
 				CurrentRPM:         item.CurrentRPM,
 				UpstreamErrorCount: item.UpstreamErrorCount,
+				ProxyHealth:        item.ProxyHealth,
 			}
 		}
 		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)

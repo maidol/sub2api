@@ -1212,6 +1212,17 @@ export interface Gemini38SchedulerStatus {
   reason?: string
 }
 
+export interface AccountProxyHealth {
+  latency_status: 'success' | 'failed'
+  latency_ms?: number | null
+  latency_message?: string
+  country_code?: string
+  quality_status?: 'healthy' | 'warn' | 'challenge' | 'failed'
+  quality_summary?: string
+  /** Unix timestamp in seconds. */
+  checked_at?: number
+}
+
 export interface Account {
   id: number
   name: string
@@ -1282,6 +1293,7 @@ export interface Account {
   created_at: string
   updated_at: string
   proxy?: Proxy
+  proxy_health?: AccountProxyHealth
   group_ids?: number[] // Groups this account belongs to
   groups?: Group[] // Preloaded group objects
 

@@ -602,6 +602,13 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 	}
 }
 
+func (s *adminServiceImpl) GetProxyLatencies(ctx context.Context, ids []int64) (map[int64]*ProxyLatencyInfo, error) {
+	if s.proxyLatencyCache == nil || len(ids) == 0 {
+		return map[int64]*ProxyLatencyInfo{}, nil
+	}
+	return s.proxyLatencyCache.GetProxyLatencies(ctx, ids)
+}
+
 func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) {
 	if s.proxyLatencyCache == nil || info == nil {
 		return

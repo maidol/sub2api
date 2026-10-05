@@ -218,6 +218,18 @@ export default {
         batchCompleted: '已完成 {count} 个账号的倍率探测',
         batchPartial: '倍率探测部分完成：成功 {success} 个，失败 {failed} 个'
       },
+      proxyHealth: {
+        label: '代理健康状态',
+        proxyDisabled: '代理已停用',
+        connectionFailed: '连接失败',
+        qualityWarn: '质量警告',
+        qualityAbnormal: '质量异常',
+        notChecked: '尚未检测',
+        tooltip: '最近一次代理健康检测详情',
+        minutesAgo: '{count} 分钟前',
+        hoursAgo: '{count} 小时前',
+        daysAgo: '{count} 天前'
+      },
       allPrivacyModes: '全部Privacy状态',
       privacyUnset: '未设置',
       privacyTrainingOff: '已关闭训练数据共享',
