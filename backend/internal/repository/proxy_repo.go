@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -287,6 +288,64 @@ func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, acco
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
 	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
 	return err
+}
+
+func (r *proxyRepository) DeletePoolProxyIfUnused(ctx context.Context, id int64) (bool, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	txClient := tx.Client()
+	var lockedID int64
+	err = scanSingleRow(ctx, txClient,
+		"SELECT id FROM proxies WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+		[]any{id}, &lockedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	var accounts int64
+	if err := scanSingleRow(ctx, txClient,
+		"SELECT COUNT(*) FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL",
+		[]any{id}, &accounts); err != nil {
+		return false, err
+	}
+	if accounts > 0 {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
+	var backupRef int64
+	err = scanSingleRow(ctx, txClient,
+		"SELECT 1 FROM proxies WHERE backup_proxy_id = $1 AND deleted_at IS NULL LIMIT 1",
+		[]any{id}, &backupRef)
+	if err == nil {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+
+	if _, err := txClient.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *proxyRepository) List(ctx context.Context, params pagination.PaginationParams) ([]service.Proxy, *pagination.PaginationResult, error) {

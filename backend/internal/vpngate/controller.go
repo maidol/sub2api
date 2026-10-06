@@ -15,7 +15,8 @@ import (
 // Controller is the subset of the Mihomo external-controller API the manager
 // needs. It is an interface so tests can drive the manager without Mihomo.
 type Controller interface {
-	// Current returns the node currently selected in a select group.
+	// Current returns the node currently selected in a select group. It must be
+	// safe for concurrent calls with Select and Delay.
 	Current(ctx context.Context, group string) (string, error)
 	// Select makes node the selection of group.
 	Select(ctx context.Context, group, node string) error

@@ -381,6 +381,7 @@ type recordingSQLExecutor struct {
 	afterExec   func()
 	execQueries []string
 	execArgs    [][]any
+	queryDB     *sql.DB
 }
 
 func (e *recordingSQLExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -396,5 +397,8 @@ func (e *recordingSQLExecutor) ExecContext(ctx context.Context, query string, ar
 }
 
 func (e *recordingSQLExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if e.queryDB != nil {
+		return e.queryDB.QueryContext(ctx, query, args...)
+	}
 	return nil, sql.ErrNoRows
 }

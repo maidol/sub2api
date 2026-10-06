@@ -39,7 +39,7 @@ func guardPoolProxyCapacity(ctx context.Context, client *dbent.Client, account *
 		"SELECT managed_by, pool_shareable, pool_share_max FROM proxies WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
 		[]any{proxyID}, &managedBy, &shareable, &shareMax)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil // a missing proxy is the foreign key's business, not ours
+		return service.ErrProxyNotFound
 	}
 	if err != nil {
 		return err

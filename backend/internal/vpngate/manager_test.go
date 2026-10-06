@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -15,6 +16,7 @@ import (
 // fakeController stands in for Mihomo: groups hold a selection, nodes in
 // down fail their delay test, and every call is recorded.
 type fakeController struct {
+	mu      sync.Mutex
 	nodes   map[string]bool   // nodes that exist
 	now     map[string]string // group -> selected node
 	down    map[string]bool   // node -> delay test fails
@@ -31,6 +33,8 @@ func newFake(nodes []string, now map[string]string) *fakeController {
 }
 
 func (f *fakeController) Current(_ context.Context, group string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	n, ok := f.now[group]
 	if !ok {
 		return "", fmt.Errorf("no group %q", group)
@@ -39,6 +43,8 @@ func (f *fakeController) Current(_ context.Context, group string) (string, error
 }
 
 func (f *fakeController) Select(_ context.Context, group, node string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if !f.nodes[node] {
 		return fmt.Errorf("proxy %q not exist", node)
 	}
@@ -48,6 +54,8 @@ func (f *fakeController) Select(_ context.Context, group, node string) error {
 }
 
 func (f *fakeController) Delay(_ context.Context, node, _ string, _ time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.delays = append(f.delays, node)
 	if f.down[node] || !f.nodes[node] {
 		return errors.New("An error occurred in the delay test")
@@ -55,11 +63,48 @@ func (f *fakeController) Delay(_ context.Context, node, _ string, _ time.Duratio
 	return nil
 }
 
+type blockingController struct {
+	inner   *fakeController
+	started chan string
+	release map[string]chan struct{}
+	errors  map[string]error
+	once    sync.Once
+}
+
+func (c *blockingController) Current(ctx context.Context, group string) (string, error) {
+	return c.inner.Current(ctx, group)
+}
+
+func (c *blockingController) Select(ctx context.Context, group, node string) error {
+	return c.inner.Select(ctx, group, node)
+}
+
+func (c *blockingController) Delay(ctx context.Context, node, probeURL string, timeout time.Duration) error {
+	if release := c.release[node]; release != nil {
+		blocked := false
+		c.once.Do(func() {
+			blocked = true
+			c.started <- node
+		})
+		if blocked {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	if err := c.errors[node]; err != nil {
+		return err
+	}
+	return c.inner.Delay(ctx, node, probeURL, timeout)
+}
+
 type testClock struct{ t time.Time }
 
 func (c *testClock) Now() time.Time { return c.t }
 
-func newTestManager(f *fakeController, slots []Slot, nodes []string, threshold int, clock *testClock, logs *[]string) *Manager {
+func newTestManager(f Controller, slots []Slot, nodes []string, threshold int, clock *testClock, logs *[]string) *Manager {
 	return NewManager(f, slots, testNodes(nodes...), ManagerOptions{
 		ProbeURL:      "https://probe.example/204",
 		ProbeTimeout:  time.Second,
@@ -292,6 +337,324 @@ func TestManagerPauseSwapsCandidatesAndKeepsCooldown(t *testing.T) {
 	}
 	if f.now["sub2api-slot02"] != "B" {
 		t.Fatalf("slot02 = %q, want B: a healthy kept node stays", f.now["sub2api-slot02"])
+	}
+}
+
+func TestManagerProbeDoesNotBlockCurrentNodeOrReselect(t *testing.T) {
+	inner := newFake([]string{"A", "B", "C"}, map[string]string{"sub2api-slot01": "A", "sub2api-slot02": "B"})
+	block := &blockingController{inner: inner, started: make(chan string, 4), release: map[string]chan struct{}{"A": make(chan struct{})}, errors: map[string]error{}}
+	m := NewManager(block, twoSlots, testNodes("A", "B", "C"), ManagerOptions{
+		ProbeURL: "https://probe.example/204", ProbeTimeout: time.Second, FailThreshold: 3,
+		Cooldown: 30 * time.Minute, MaxAttempts: 5, Shuffle: func([]string) {},
+	})
+
+	tickDone := make(chan struct{})
+	go func() {
+		m.Tick(context.Background())
+		close(tickDone)
+	}()
+	select {
+	case <-block.started:
+	case <-time.After(time.Second):
+		t.Fatal("Tick did not start the blocked probe")
+	}
+
+	currentDone := make(chan error, 1)
+	go func() {
+		node, err := m.CurrentNode(context.Background(), twoSlots[0])
+		if err == nil && node != "A" {
+			err = fmt.Errorf("CurrentNode = %q, want A", node)
+		}
+		currentDone <- err
+	}()
+	select {
+	case err := <-currentDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("CurrentNode waited for the health probe")
+	}
+
+	reselectDone := make(chan error, 1)
+	go func() {
+		_, err := m.Reselect(context.Background(), twoSlots[0])
+		reselectDone <- err
+	}()
+	select {
+	case err := <-reselectDone:
+		if err != nil {
+			t.Fatalf("Reselect while Tick probe blocked: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Reselect waited for the Tick health probe")
+	}
+	close(block.release["A"])
+	select {
+	case <-tickDone:
+	case <-time.After(time.Second):
+		t.Fatal("Tick did not finish after releasing probe")
+	}
+}
+
+func TestManagerProbeOverlappingPauseIsDiscarded(t *testing.T) {
+	clock := &testClock{t: time.Date(2026, 10, 1, 4, 0, 0, 0, time.UTC)}
+	f := newFake([]string{"A", "B", "C"}, map[string]string{"sub2api-slot01": "A"})
+	c := &blockingController{
+		inner:   f,
+		started: make(chan string, 1),
+		release: map[string]chan struct{}{"A": make(chan struct{})},
+		errors:  map[string]error{},
+	}
+	m := newTestManager(c, MakeSlots(1, 20001), []string{"A", "B", "C"}, 1, clock, nil)
+
+	tickDone := make(chan struct{})
+	go func() { m.Tick(context.Background()); close(tickDone) }()
+	<-c.started
+
+	paused := make(chan func([]Node), 1)
+	go func() { paused <- m.Pause() }()
+	select {
+	case resume := <-paused:
+		c.errors["A"] = errors.New("mihomo restarting: connection refused")
+		close(c.release["A"])
+		time.Sleep(50 * time.Millisecond)
+		resume(nil)
+	case <-time.After(300 * time.Millisecond):
+		close(c.release["A"])
+		(<-paused)(nil)
+	}
+	select {
+	case <-tickDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Tick did not finish")
+	}
+	got, _ := f.Current(context.Background(), "sub2api-slot01")
+	m.mu.Lock()
+	cooled := m.badUntil["A"].After(clock.Now())
+	fails := m.fails["sub2api-slot01"]
+	m.mu.Unlock()
+	if got != "A" || cooled || fails != 0 {
+		t.Fatalf("probe overlapping a reload was counted: slot on %q, A cooled=%v, fails=%d; want A, false, 0", got, cooled, fails)
+	}
+}
+
+func TestManagerCandidateProbeOverlappingPauseIsDiscarded(t *testing.T) {
+	clock := &testClock{t: time.Date(2026, 10, 1, 4, 0, 0, 0, time.UTC)}
+	f := newFake([]string{"A", "B", "C"}, map[string]string{"sub2api-slot01": "A"})
+	f.down["A"] = true
+	c := &blockingController{
+		inner:   f,
+		started: make(chan string, 1),
+		release: map[string]chan struct{}{"B": make(chan struct{})},
+		errors:  map[string]error{},
+	}
+	m := newTestManager(c, MakeSlots(1, 20001), []string{"A", "B", "C"}, 1, clock, nil)
+
+	tickDone := make(chan struct{})
+	go func() { m.Tick(context.Background()); close(tickDone) }()
+	select {
+	case node := <-c.started:
+		if node != "B" {
+			t.Fatalf("blocked candidate = %q, want B", node)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Tick did not start the blocked candidate probe")
+	}
+
+	paused := make(chan func([]Node), 1)
+	go func() { paused <- m.Pause() }()
+	select {
+	case resume := <-paused:
+		c.errors["B"] = errors.New("mihomo restarting: connection refused")
+		close(c.release["B"])
+		time.Sleep(50 * time.Millisecond)
+		resume(testNodes("A", "C"))
+	case <-time.After(300 * time.Millisecond):
+		close(c.release["B"])
+		(<-paused)(nil)
+	}
+	select {
+	case <-tickDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Tick did not finish")
+	}
+	m.mu.Lock()
+	_, cooled := m.badUntil["B"]
+	m.mu.Unlock()
+	if cooled {
+		t.Fatal("candidate probe overlapping a reload cooled B")
+	}
+}
+
+func TestManagerCurrentNodeDoesNotWaitForReselectProbe(t *testing.T) {
+	inner := newFake([]string{"A", "B"}, map[string]string{"sub2api-slot01": "A"})
+	block := &blockingController{inner: inner, started: make(chan string, 1), release: map[string]chan struct{}{"B": make(chan struct{})}, errors: map[string]error{}}
+	m := newTestManager(block, MakeSlots(1, 20001), []string{"A", "B"}, 1, &testClock{time.Unix(0, 0)}, nil)
+
+	reselectDone := make(chan error, 1)
+	go func() {
+		_, err := m.Reselect(context.Background(), MakeSlots(1, 20001)[0])
+		reselectDone <- err
+	}()
+	select {
+	case node := <-block.started:
+		if node != "B" {
+			t.Fatalf("blocked candidate = %q, want B", node)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Reselect did not start the blocked candidate probe")
+	}
+
+	currentDone := make(chan error, 1)
+	go func() {
+		node, err := m.CurrentNode(context.Background(), MakeSlots(1, 20001)[0])
+		if err == nil && node != "A" {
+			err = fmt.Errorf("CurrentNode = %q, want A", node)
+		}
+		currentDone <- err
+	}()
+	select {
+	case err := <-currentDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("CurrentNode waited for the Reselect probe")
+	}
+
+	close(block.release["B"])
+	select {
+	case err := <-reselectDone:
+		if err != nil {
+			t.Fatalf("Reselect error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Reselect did not finish after releasing probe")
+	}
+}
+
+func TestManagerCanceledProbeDoesNotCoolNode(t *testing.T) {
+	inner := newFake([]string{"A", "B"}, map[string]string{"sub2api-slot01": "A"})
+	block := &blockingController{inner: inner, started: make(chan string, 1), release: map[string]chan struct{}{"A": make(chan struct{})}, errors: map[string]error{}}
+	m := newTestManager(block, MakeSlots(1, 20001), []string{"A", "B"}, 1, &testClock{time.Unix(0, 0)}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.Tick(ctx)
+		close(done)
+	}()
+	select {
+	case <-block.started:
+	case <-time.After(time.Second):
+		t.Fatal("Tick did not start the blocked probe")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Tick did not stop after caller cancellation")
+	}
+	m.mu.Lock()
+	_, cooled := m.badUntil["A"]
+	failures := m.fails[twoSlots[0].Name]
+	m.mu.Unlock()
+	if cooled || failures != 0 {
+		t.Fatalf("canceled probe state: cooled=%v failures=%d, want no cooldown and zero failures", cooled, failures)
+	}
+}
+
+func TestManagerCanceledReselectProbeDoesNotCoolCandidate(t *testing.T) {
+	inner := newFake([]string{"A", "B"}, map[string]string{"sub2api-slot01": "A"})
+	block := &blockingController{inner: inner, started: make(chan string, 1), release: map[string]chan struct{}{"B": make(chan struct{})}, errors: map[string]error{}}
+	m := newTestManager(block, MakeSlots(1, 20001), []string{"A", "B"}, 1, &testClock{time.Unix(0, 0)}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.Reselect(ctx, MakeSlots(1, 20001)[0])
+		done <- err
+	}()
+	select {
+	case <-block.started:
+	case <-time.After(time.Second):
+		t.Fatal("Reselect did not start its candidate probe")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Reselect error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Reselect did not stop after caller cancellation")
+	}
+	m.mu.Lock()
+	_, candidateCooled := m.badUntil["B"]
+	_, currentCooled := m.badUntil["A"]
+	m.mu.Unlock()
+	if candidateCooled || currentCooled {
+		t.Fatalf("caller-canceled reselect cooldowns: candidate=%v current=%v, want neither cooled", candidateCooled, currentCooled)
+	}
+}
+
+func TestManagerInnerDeadlineErrorCountsAsFailure(t *testing.T) {
+	inner := newFake([]string{"A", "B"}, map[string]string{"sub2api-slot01": "A"})
+	block := &blockingController{inner: inner, started: make(chan string, 1), release: map[string]chan struct{}{}, errors: map[string]error{"A": context.DeadlineExceeded}}
+	m := newTestManager(block, MakeSlots(1, 20001), []string{"A", "B"}, 1, &testClock{time.Unix(0, 0)}, nil)
+	m.Tick(context.Background())
+	m.mu.Lock()
+	_, cooled := m.badUntil["A"]
+	m.mu.Unlock()
+	if !cooled || inner.now[MakeSlots(1, 20001)[0].Group()] == "A" {
+		t.Fatalf("inner timeout state: cooled=%v current=%q, want cooldown and a reselected node", cooled, inner.now[twoSlots[0].Group()])
+	}
+}
+
+func TestManagerTickReselectDoesNotDuplicateNode(t *testing.T) {
+	inner := newFake([]string{"A", "B", "C", "D"}, map[string]string{"sub2api-slot01": "A", "sub2api-slot02": "B"})
+	inner.down["A"] = true
+	block := &blockingController{inner: inner, started: make(chan string, 1), release: map[string]chan struct{}{"C": make(chan struct{})}, errors: map[string]error{}}
+	m := newTestManager(block, twoSlots, []string{"A", "B", "C", "D"}, 1, &testClock{time.Unix(0, 0)}, nil)
+
+	tickDone := make(chan struct{})
+	go func() {
+		m.Tick(context.Background())
+		close(tickDone)
+	}()
+	select {
+	case node := <-block.started:
+		if node != "C" {
+			t.Fatalf("blocked candidate = %q, want C", node)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Tick did not block on its internal candidate probe")
+	}
+
+	reselectDone := make(chan error, 1)
+	go func() {
+		_, err := m.Reselect(context.Background(), twoSlots[1])
+		reselectDone <- err
+	}()
+	select {
+	case err := <-reselectDone:
+		if err != nil {
+			t.Fatalf("API Reselect during Tick candidate probe: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("API Reselect waited for Tick candidate probe")
+	}
+	close(block.release["C"])
+	select {
+	case <-tickDone:
+	case <-time.After(time.Second):
+		t.Fatal("Tick did not finish after candidate probe release")
+	}
+
+	inner.mu.Lock()
+	first, second := inner.now[twoSlots[0].Group()], inner.now[twoSlots[1].Group()]
+	inner.mu.Unlock()
+	if first == second {
+		t.Fatalf("slots selected the same node %q", first)
 	}
 }
 

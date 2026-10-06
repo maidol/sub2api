@@ -302,11 +302,17 @@ func TestBulkUpdateOpenCodeGoIdentityCleanupIsValueConditional(t *testing.T) {
 // 行在代理变化时会先命中 OpenCode 分支而遮蔽 Ollama 快照清理。这里断言 OpenCode 分支
 // 的 WHEN 携带 opencode 正则（与 Ollama 正则互斥），真实行为由 integration 测试覆盖。
 func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
-	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1), queryDB: db}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	proxyID := int64(9)
-	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
+	mock.ExpectQuery(`SELECT id FROM proxies WHERE id = \$1 AND deleted_at IS NULL FOR UPDATE`).
+		WithArgs(proxyID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(proxyID))
+	_, err = repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
 		ProxyID: &proxyID,
 	})
 
@@ -418,11 +424,17 @@ func TestOpenCodeGoUsagePlatformWhitelistMatchesServicePredicate(t *testing.T) {
 }
 
 func TestBulkUpdateOpenCodeGoProxyChangeClearsSnapshotOnly(t *testing.T) {
-	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1), queryDB: db}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	proxyID := int64(9)
-	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
+	mock.ExpectQuery(`SELECT id FROM proxies WHERE id = \$1 AND deleted_at IS NULL FOR UPDATE`).
+		WithArgs(proxyID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(proxyID))
+	_, err = repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
 		ProxyID: &proxyID,
 	})
 

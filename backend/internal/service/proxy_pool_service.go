@@ -406,10 +406,11 @@ func (s *ProxyPoolService) ListShareable(ctx context.Context) ([]ProxyPoolShareC
 	if err != nil {
 		return nil, err
 	}
+	now := s.now()
 	out := make([]ProxyPoolShareCandidate, 0)
 	for i := range all {
 		p := all[i]
-		if p.ManagedBy != ProxyManagedByPool || !p.PoolShareable {
+		if p.ManagedBy != ProxyManagedByPool || !p.PoolShareable || p.Status != StatusActive || p.IsExpired(now) {
 			continue
 		}
 		used := occupancy[p.ID]
@@ -466,8 +467,8 @@ func (s *ProxyPoolService) release(ctx context.Context, leaseID string) bool {
 // proxyPoolRowGrace old and used by no account and no proxy as its backup,
 // and (2) provider leases made
 // by Sub2API that no pool-managed row refers to (a crash between lease and
-// row, or a row an admin deleted by hand). It returns how many rows and how
-// many orphan leases it released.
+// row, or a row an admin deleted by hand). It returns how many local rows it
+// soft-deleted and how many orphan leases it released.
 func (s *ProxyPoolService) Reconcile(ctx context.Context) (rows int, orphans int, err error) {
 	baseURL, token, _, err := s.resolve(ctx)
 	if err != nil {
@@ -499,23 +500,19 @@ func (s *ProxyPoolService) Reconcile(ctx context.Context) (rows int, orphans int
 			refs[p.ExternalRef] = true
 			continue
 		}
-		count, err := s.proxyRepo.CountAccountsByProxyID(ctx, p.ID)
+		deleted, err := s.proxyRepo.DeletePoolProxyIfUnused(ctx, p.ID)
 		if err != nil {
 			return rows, orphans, err
 		}
-		if count > 0 {
+		if !deleted {
 			refs[p.ExternalRef] = true
 			continue
 		}
+		rows++                     // rows counts local soft-deletes, independent of provider release
+		refs[p.ExternalRef] = true // a failed release becomes an orphan next round
 		if !s.release(ctx, p.ExternalRef) {
-			refs[p.ExternalRef] = true // try again next round
 			continue
 		}
-		refs[p.ExternalRef] = true // released just now; not an orphan below
-		if err := s.proxyRepo.Delete(ctx, p.ID); err != nil {
-			return rows, orphans, err
-		}
-		rows++
 		log.Printf("[ProxyPool] released unused proxy %d", p.ID)
 	}
 

@@ -73,6 +73,9 @@ func (m *mockProxyRepoForOAuth) Update(ctx context.Context, proxy *Proxy) error 
 func (m *mockProxyRepoForOAuth) Delete(ctx context.Context, id int64) error {
 	panic("Delete not implemented")
 }
+func (m *mockProxyRepoForOAuth) DeletePoolProxyIfUnused(context.Context, int64) (bool, error) {
+	panic("DeletePoolProxyIfUnused not implemented")
+}
 func (m *mockProxyRepoForOAuth) List(ctx context.Context, params pagination.PaginationParams) ([]Proxy, *pagination.PaginationResult, error) {
 	panic("List not implemented")
 }

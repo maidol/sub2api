@@ -783,6 +783,9 @@ func (m *mockGeminiProxyRepo) ListByIDs(ctx context.Context, ids []int64) ([]Pro
 }
 func (m *mockGeminiProxyRepo) Update(ctx context.Context, proxy *Proxy) error { panic("not impl") }
 func (m *mockGeminiProxyRepo) Delete(ctx context.Context, id int64) error     { panic("not impl") }
+func (m *mockGeminiProxyRepo) DeletePoolProxyIfUnused(context.Context, int64) (bool, error) {
+	panic("not impl")
+}
 func (m *mockGeminiProxyRepo) List(ctx context.Context, params pagination.PaginationParams) ([]Proxy, *pagination.PaginationResult, error) {
 	panic("not impl")
 }

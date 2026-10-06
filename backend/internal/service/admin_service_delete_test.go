@@ -363,6 +363,16 @@ func (s *proxyRepoStub) Delete(ctx context.Context, id int64) error {
 	return s.deleteErr
 }
 
+func (s *proxyRepoStub) DeletePoolProxyIfUnused(ctx context.Context, id int64) (bool, error) {
+	if s.accountCount > 0 {
+		return false, nil
+	}
+	if err := s.Delete(ctx, id); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *proxyRepoStub) List(ctx context.Context, params pagination.PaginationParams) ([]Proxy, *pagination.PaginationResult, error) {
 	panic("unexpected List call")
 }

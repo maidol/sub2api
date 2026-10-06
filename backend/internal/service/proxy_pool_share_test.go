@@ -32,11 +32,11 @@ func TestAllocateLeasesANewSlotWithTheDefaultShareSettings(t *testing.T) {
 
 func TestAllocateFallsBackToTheLeastUsedSharedSlot(t *testing.T) {
 	svc, _, repo := newPoolService(t, exhaustedProvider())
-	repo.rows[1] = &Proxy{ID: 1, ManagedBy: ProxyManagedByPool, ExternalRef: "l-1", PoolShareable: true, PoolShareMax: 3}
+	repo.rows[1] = &Proxy{ID: 1, ManagedBy: ProxyManagedByPool, ExternalRef: "l-1", PoolShareable: true, PoolShareMax: 3, Status: StatusActive}
 	repo.counts[1] = 2
-	repo.rows[2] = &Proxy{ID: 2, ManagedBy: ProxyManagedByPool, ExternalRef: "l-2", PoolShareable: true, PoolShareMax: 0}
+	repo.rows[2] = &Proxy{ID: 2, ManagedBy: ProxyManagedByPool, ExternalRef: "l-2", PoolShareable: true, PoolShareMax: 0, Status: StatusActive}
 	repo.counts[2] = 1
-	repo.rows[3] = &Proxy{ID: 3, ManagedBy: ProxyManagedByPool, ExternalRef: "l-3", PoolShareable: true, PoolShareMax: 1}
+	repo.rows[3] = &Proxy{ID: 3, ManagedBy: ProxyManagedByPool, ExternalRef: "l-3", PoolShareable: true, PoolShareMax: 1, Status: StatusActive}
 	repo.counts[3] = 0
 	repo.rows[4] = &Proxy{ID: 4, ManagedBy: ProxyManagedByPool, ExternalRef: "l-4"} // not shared
 	repo.rows[5] = &Proxy{ID: 5, Name: "hand-made", PoolShareable: true}            // not pool-managed
@@ -75,11 +75,11 @@ func TestAllocateDoesNotShareOnOtherProviderErrors(t *testing.T) {
 
 func TestListShareableReturnsSharedSlotsWithRoomByUse(t *testing.T) {
 	svc, _, repo := newPoolService(t, nil)
-	repo.rows[1] = &Proxy{ID: 1, ManagedBy: ProxyManagedByPool, PoolShareable: true, PoolShareMax: 5}
+	repo.rows[1] = &Proxy{ID: 1, ManagedBy: ProxyManagedByPool, PoolShareable: true, PoolShareMax: 5, Status: StatusActive}
 	repo.counts[1] = 3
-	repo.rows[2] = &Proxy{ID: 2, ManagedBy: ProxyManagedByPool, PoolShareable: true}
+	repo.rows[2] = &Proxy{ID: 2, ManagedBy: ProxyManagedByPool, PoolShareable: true, Status: StatusActive}
 	repo.counts[2] = 1
-	repo.rows[3] = &Proxy{ID: 3, ManagedBy: ProxyManagedByPool, PoolShareable: true, PoolShareMax: 2}
+	repo.rows[3] = &Proxy{ID: 3, ManagedBy: ProxyManagedByPool, PoolShareable: true, PoolShareMax: 2, Status: StatusActive}
 	repo.counts[3] = 2
 	repo.rows[4] = &Proxy{ID: 4, ManagedBy: ProxyManagedByPool}
 

@@ -3299,6 +3299,19 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 
+	if updates.ProxyID != nil && *updates.ProxyID > 0 {
+		var proxyID int64
+		err := scanSingleRow(ctx, exec,
+			"SELECT id FROM proxies WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+			[]any{*updates.ProxyID}, &proxyID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, service.ErrProxyNotFound
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err

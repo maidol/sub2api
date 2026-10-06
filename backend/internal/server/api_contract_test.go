@@ -2099,6 +2099,10 @@ func (stubProxyRepo) Delete(ctx context.Context, id int64) error {
 	return errors.New("not implemented")
 }
 
+func (stubProxyRepo) DeletePoolProxyIfUnused(ctx context.Context, id int64) (bool, error) {
+	return false, errors.New("not implemented")
+}
+
 func (stubProxyRepo) List(ctx context.Context, params pagination.PaginationParams) ([]service.Proxy, *pagination.PaginationResult, error) {
 	return nil, nil, errors.New("not implemented")
 }

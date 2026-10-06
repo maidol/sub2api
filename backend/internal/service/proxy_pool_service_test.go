@@ -71,6 +71,7 @@ type poolProxyRepo struct {
 	nextID    int64
 	createErr error
 	deleted   []int64
+	events    *[]string
 	now       time.Time // CreatedAt of new rows, as the database would set it
 }
 
@@ -132,7 +133,28 @@ func (r *poolProxyRepo) Update(_ context.Context, p *Proxy) error {
 func (r *poolProxyRepo) Delete(_ context.Context, id int64) error {
 	delete(r.rows, id)
 	r.deleted = append(r.deleted, id)
+	if r.events != nil {
+		*r.events = append(*r.events, "local-delete")
+	}
 	return nil
+}
+
+func (r *poolProxyRepo) DeletePoolProxyIfUnused(_ context.Context, id int64) (bool, error) {
+	if r.counts[id] > 0 {
+		return false, nil
+	}
+	if r.deleteErr != nil {
+		return false, r.deleteErr
+	}
+	if _, ok := r.rows[id]; !ok {
+		return false, nil
+	}
+	delete(r.rows, id)
+	r.deleted = append(r.deleted, id)
+	if r.events != nil {
+		*r.events = append(*r.events, "local-delete")
+	}
+	return true, nil
 }
 
 // fakePoolProvider is the vpngate lease API. handle decides the answer per
@@ -377,10 +399,10 @@ func TestProxyPoolReconcileReleasesOnlyOldUnusedRowsAndOrphanLeases(t *testing.T
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	if rows != 1 || orphans != 1 {
-		t.Fatalf("released rows=%d orphans=%d, want 1 and 1", rows, orphans)
+	if rows != 2 || orphans != 1 {
+		t.Fatalf("locally deleted rows=%d orphans=%d, want 2 and 1", rows, orphans)
 	}
-	if want := []int64{1}; !reflect.DeepEqual(repo.deleted, want) {
+	if want := []int64{1, 5}; !reflect.DeepEqual(repo.deleted, want) {
 		t.Fatalf("deleted rows = %v, want %v", repo.deleted, want)
 	}
 	var deletes []string
@@ -392,6 +414,32 @@ func TestProxyPoolReconcileReleasesOnlyOldUnusedRowsAndOrphanLeases(t *testing.T
 	want := []string{"DELETE /v1/leases/l-old-unused", "DELETE /v1/leases/l-stuck", "DELETE /v1/leases/l-orphan-old"}
 	if !reflect.DeepEqual(deletes, want) {
 		t.Fatalf("provider deletes = %v, want %v", deletes, want)
+	}
+}
+
+func TestProxyPoolReconcileDeletesBeforeProviderRelease(t *testing.T) {
+	var events []string
+	f := &fakePoolProvider{handle: func(method, path, body string) (int, string) {
+		if method == http.MethodDelete {
+			events = append(events, "provider-release")
+		}
+		if method == http.MethodGet && path == "/v1/leases" {
+			return http.StatusOK, `{"leases":[]}`
+		}
+		if method == http.MethodDelete {
+			return http.StatusNoContent, ""
+		}
+		return http.StatusNotFound, ""
+	}}
+	svc, _, repo := newPoolService(t, f)
+	repo.events = &events
+	repo.rows[1] = &Proxy{ID: 1, ManagedBy: ProxyManagedByPool, ExternalRef: "l-old", CreatedAt: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
+
+	if _, _, err := svc.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if want := []string{"local-delete", "provider-release"}; !reflect.DeepEqual(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
 	}
 }
 

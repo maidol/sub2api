@@ -49,6 +49,10 @@ func (r *contentModerationTestProxyRepo) Delete(ctx context.Context, id int64) e
 	panic("not implemented")
 }
 
+func (r *contentModerationTestProxyRepo) DeletePoolProxyIfUnused(context.Context, int64) (bool, error) {
+	panic("not implemented")
+}
+
 func (r *contentModerationTestProxyRepo) List(ctx context.Context, params pagination.PaginationParams) ([]Proxy, *pagination.PaginationResult, error) {
 	panic("not implemented")
 }
