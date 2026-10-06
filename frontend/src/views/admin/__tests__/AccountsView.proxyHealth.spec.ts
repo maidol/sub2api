@@ -127,7 +127,10 @@ function mountView() {
         AccountUsageCell: true,
         UpstreamBillingRateCell: true,
         HelpTooltip: HelpTooltipStub,
-        Icon: true
+        Icon: defineComponent({
+          props: { name: { type: String, required: true }, size: { type: String, default: 'md' } },
+          template: '<svg :data-icon="name" />'
+        })
       }
     }
   })
@@ -163,6 +166,7 @@ describe('admin AccountsView proxy health', () => {
 
     expect(wrapper.get('[data-test="proxy-health-state"]').text()).toBe('failed')
     expect(wrapper.get('[data-test="proxy-cell"]').text()).toContain('admin.accounts.proxyHealth.connectionFailed')
+    expect(wrapper.get('[data-icon="exclamationCircle"]').classes()).toContain('text-red-500')
     expect(wrapper.get('[data-test="proxy-health-tooltip"]').attributes('title')).toContain('connection refused')
     wrapper.unmount()
   })

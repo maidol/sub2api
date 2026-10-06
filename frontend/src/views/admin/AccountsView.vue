@@ -333,6 +333,15 @@
                 <span v-if="row.proxy_health?.country_code" class="text-xs text-gray-500 dark:text-gray-400">
                   ({{ row.proxy_health.country_code }})
                 </span>
+                <Icon
+                  v-if="row.proxy.status === 'inactive' || row.proxy_health?.latency_status === 'failed' || ['warn', 'challenge', 'failed'].includes(row.proxy_health?.quality_status ?? '')"
+                  name="exclamationCircle"
+                  size="xs"
+                  class="text-red-500 dark:text-red-400"
+                  :title="t('admin.accounts.proxyHealth.tooltip')"
+                  role="img"
+                  :aria-label="t('admin.accounts.proxyHealth.tooltip')"
+                />
               </div>
               <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
               <div
