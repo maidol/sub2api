@@ -843,3 +843,7 @@ func (s *stubAdminService) CreateShadow(ctx context.Context, parentID int64, opt
 
 // Ensure stub implements interface.
 var _ service.AdminService = (*stubAdminService)(nil)
+
+func (s *stubAdminService) ProbeProxyLatency(ctx context.Context, proxy *service.Proxy) error {
+	return nil
+}
