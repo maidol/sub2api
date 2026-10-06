@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
 type proxyHealthProbeRepositoryStub struct {
@@ -475,8 +476,8 @@ func TestProxyHealthProbeRunOnceLogsOneAggregateLine(t *testing.T) {
 	if got := strings.Count(strings.TrimSpace(output.String()), "\n"); got != 0 {
 		t.Fatalf("round logged %d lines, want exactly one: %q", got+1, output.String())
 	}
-	if !strings.Contains(output.String(), "checked=2") || !strings.Contains(output.String(), "failed=2") {
-		t.Fatalf("round summary = %q, want checked=2 and failed=2", output.String())
+	if !strings.Contains(output.String(), "checked=2") || !strings.Contains(output.String(), "unreachable=2") {
+		t.Fatalf("round summary = %q, want checked=2 and unreachable=2", output.String())
 	}
 }
 
@@ -496,5 +497,88 @@ func TestProxyHealthProbeRunOnceLogMentionsListError(t *testing.T) {
 	}
 	if got := strings.Count(strings.TrimSpace(output.String()), "\n"); got != 0 {
 		t.Fatalf("round logged %d lines, want exactly one: %q", got+1, output.String())
+	}
+}
+
+type proxyHealthProbeLogSink struct {
+	mu     sync.Mutex
+	events []logger.LogEvent
+}
+
+func (s *proxyHealthProbeLogSink) WriteLogEvent(event *logger.LogEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, *event)
+}
+
+func (s *proxyHealthProbeLogSink) summaryLevels() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var levels []string
+	for _, event := range s.events {
+		if strings.Contains(event.Message, "[ProxyHealthProbe] checked=") {
+			levels = append(levels, event.Level)
+		}
+	}
+	return levels
+}
+
+func TestProxyHealthProbeRoundSummaryIsLoggedAtInfoLevel(t *testing.T) {
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	originalPrefix := log.Prefix()
+	t.Cleanup(func() {
+		logger.SetSink(nil)
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+		log.SetPrefix(originalPrefix)
+	})
+	if err := logger.Init(logger.InitOptions{
+		Level:       "info",
+		Format:      "json",
+		ServiceName: "sub2api",
+		Environment: "test",
+		Output: logger.OutputOptions{
+			ToStdout: true,
+			ToFile:   false,
+		},
+	}); err != nil {
+		t.Fatalf("init logger: %v", err)
+	}
+
+	cases := []struct {
+		name  string
+		repo  *proxyHealthProbeRepositoryStub
+		admin *proxyHealthProbeAdminStub
+	}{
+		{
+			name: "two unreachable proxies",
+			repo: &proxyHealthProbeRepositoryStub{proxies: []ProxyWithAccountCount{
+				{Proxy: Proxy{ID: 1, Status: StatusActive}, AccountCount: 1},
+				{Proxy: Proxy{ID: 2, Status: StatusActive}, AccountCount: 1},
+			}},
+			admin: &proxyHealthProbeAdminStub{errors: map[int64]error{
+				1: errors.New("first failure"),
+				2: errors.New("second failure"),
+			}},
+		},
+		{
+			name:  "no candidates",
+			repo:  &proxyHealthProbeRepositoryStub{},
+			admin: &proxyHealthProbeAdminStub{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &proxyHealthProbeLogSink{}
+			logger.SetSink(sink)
+
+			NewProxyHealthProbeService(tc.repo, tc.admin, time.Minute, time.Second).runOnce(t.Context())
+
+			// 汇总行经 stdlog 桥按关键词推断级别；记成 warn/error 会被运维系统日志入库，每 10 分钟一条假告警。
+			if got := sink.summaryLevels(); !slices.Equal(got, []string{"info"}) {
+				t.Fatalf("round summary levels = %v, want exactly [info]", got)
+			}
+		})
 	}
 }

@@ -92,7 +92,7 @@ func (s *ProxyHealthProbeService) runOnce(ctx context.Context) {
 		candidates = append(candidates, proxy)
 	}
 	if len(candidates) == 0 {
-		log.Printf("[ProxyHealthProbe] checked=0 failed=0")
+		log.Printf("[ProxyHealthProbe] checked=0 unreachable=0")
 		return
 	}
 
@@ -120,5 +120,7 @@ func (s *ProxyHealthProbeService) runOnce(ctx context.Context) {
 	}
 	close(jobs)
 	workers.Wait()
-	log.Printf("[ProxyHealthProbe] checked=%d failed=%d", attempted, failed)
+	// 汇总里不要出现 " failed" / "error" / "warn" 等词：stdlog 桥按关键词推断级别，
+	// 会把每一轮正常汇总记成 ERROR 并写进运维系统日志。
+	log.Printf("[ProxyHealthProbe] checked=%d unreachable=%d", attempted, failed)
 }
