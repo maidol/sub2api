@@ -359,25 +359,31 @@
                   v-if="row.proxy_health?.latency_status === 'failed'"
                   :content="row.proxy_health.latency_message || t('admin.accounts.proxyHealth.tooltip')"
                 >
-                  <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
-                    {{ t('admin.accounts.proxyHealth.connectionFailed') }}
-                  </span>
+                  <template #trigger>
+                    <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
+                      {{ t('admin.accounts.proxyHealth.connectionFailed') }}
+                    </span>
+                  </template>
                 </HelpTooltip>
                 <HelpTooltip
                   v-if="row.proxy_health?.quality_status === 'warn'"
                   :content="row.proxy_health.quality_summary || t('admin.accounts.proxyHealth.tooltip')"
                 >
-                  <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
-                    {{ t('admin.accounts.proxyHealth.qualityWarn') }}
-                  </span>
+                  <template #trigger>
+                    <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
+                      {{ t('admin.accounts.proxyHealth.qualityWarn') }}
+                    </span>
+                  </template>
                 </HelpTooltip>
                 <HelpTooltip
                   v-if="row.proxy_health?.quality_status === 'challenge' || row.proxy_health?.quality_status === 'failed'"
                   :content="row.proxy_health.quality_summary || t('admin.accounts.proxyHealth.tooltip')"
                 >
-                  <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
-                    {{ t('admin.accounts.proxyHealth.qualityAbnormal') }}
-                  </span>
+                  <template #trigger>
+                    <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
+                      {{ t('admin.accounts.proxyHealth.qualityAbnormal') }}
+                    </span>
+                  </template>
                 </HelpTooltip>
               </div>
               <div v-if="row.proxy" class="text-xs text-gray-500 dark:text-gray-400">

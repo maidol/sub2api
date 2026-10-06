@@ -60,7 +60,14 @@ const DataTableStub = defineComponent({
 
 const HelpTooltipStub = defineComponent({
   props: { content: { type: String, default: '' } },
-  template: '<span data-test="proxy-health-tooltip" :title="content"><slot /><slot name="trigger" /></span>'
+  template: `
+    <span data-test="proxy-health-tooltip" :title="content">
+      <span data-test="proxy-health-tooltip-trigger">
+        <slot name="trigger"><svg data-test="default-tooltip-trigger" /></slot>
+      </span>
+      <span data-test="proxy-health-tooltip-content"><slot>{{ content }}</slot></span>
+    </span>
+  `
 })
 
 const EditAccountModalStub = defineComponent({
@@ -165,7 +172,9 @@ describe('admin AccountsView proxy health', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="proxy-health-state"]').text()).toBe('failed')
-    expect(wrapper.get('[data-test="proxy-cell"]').text()).toContain('admin.accounts.proxyHealth.connectionFailed')
+    expect(wrapper.get('[data-test="proxy-health-tooltip-trigger"]').text()).toContain('admin.accounts.proxyHealth.connectionFailed')
+    expect(wrapper.find('[data-test="default-tooltip-trigger"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="proxy-health-tooltip-content"]').text()).toContain('connection refused')
     expect(wrapper.get('[data-icon="exclamationCircle"]').classes()).toContain('text-red-500')
     expect(wrapper.get('[data-test="proxy-health-tooltip"]').attributes('title')).toContain('connection refused')
     wrapper.unmount()
