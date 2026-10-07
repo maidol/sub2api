@@ -193,6 +193,95 @@ func TestSchedulerCacheSetSnapshotMatchesIDPublishing(t *testing.T) {
 	}
 }
 
+func TestSchedulerCacheProxyMetadataRoundTripsThroughRedis(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	expiresAt := time.Date(2026, time.October, 8, 12, 0, 0, 0, time.UTC)
+	proxyID := int64(4201)
+	account := service.Account{
+		ID:       4202,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		ProxyID:  &proxyID,
+		Proxy: &service.Proxy{
+			ID:        proxyID,
+			Status:    service.StatusActive,
+			ExpiresAt: &expiresAt,
+			Protocol:  "http",
+			Host:      "proxy-secret.example",
+			Port:      8080,
+			Username:  "proxy-user-secret",
+			Password:  "proxy-password-secret",
+		},
+	}
+	bucket := service.SchedulerBucket{GroupID: 4203, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, []service.Account{account}))
+
+	snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, snapshot, 1)
+	cached := snapshot[0]
+	require.NotNil(t, cached.ProxyID)
+	require.Equal(t, proxyID, *cached.ProxyID)
+	require.NotNil(t, cached.Proxy)
+	require.Equal(t, proxyID, cached.Proxy.ID)
+	require.Equal(t, service.StatusActive, cached.Proxy.Status)
+	require.Equal(t, expiresAt, *cached.Proxy.ExpiresAt)
+
+	metaPayload, err := cache.rdb.Get(ctx, schedulerAccountMetaKey(strconv.FormatInt(account.ID, 10))).Bytes()
+	require.NoError(t, err)
+	for _, secret := range []string{"proxy-secret.example", "proxy-user-secret", "proxy-password-secret", "\"port\""} {
+		require.NotContains(t, string(metaPayload), secret)
+	}
+}
+
+func TestSchedulerCacheSetAccountProxyMetadataRoundTripsThroughRedis(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	expiresAt := time.Date(2026, time.October, 8, 12, 0, 0, 0, time.UTC)
+	proxyID := int64(4211)
+	account := &service.Account{
+		ID:      4212,
+		ProxyID: &proxyID,
+		Proxy: &service.Proxy{
+			ID:        proxyID,
+			Status:    service.StatusActive,
+			ExpiresAt: &expiresAt,
+			Host:      "proxy-secret.example",
+			Username:  "proxy-user-secret",
+			Password:  "proxy-password-secret",
+		},
+	}
+	require.NoError(t, cache.SetAccount(ctx, account))
+
+	bucket := service.SchedulerBucket{GroupID: 4213, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshotByAccountIDs(ctx, bucket, token, []int64{account.ID}))
+
+	snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, snapshot, 1)
+	cached := snapshot[0]
+	require.NotNil(t, cached.ProxyID)
+	require.Equal(t, proxyID, *cached.ProxyID)
+	require.NotNil(t, cached.Proxy)
+	require.Equal(t, proxyID, cached.Proxy.ID)
+	require.Equal(t, service.StatusActive, cached.Proxy.Status)
+	require.NotNil(t, cached.Proxy.ExpiresAt)
+	require.Equal(t, expiresAt, *cached.Proxy.ExpiresAt)
+
+	metaPayload, err := cache.rdb.Get(ctx, schedulerAccountMetaKey(strconv.FormatInt(account.ID, 10))).Bytes()
+	require.NoError(t, err)
+	for _, secret := range []string{"proxy-secret.example", "proxy-user-secret", "proxy-password-secret"} {
+		require.NotContains(t, string(metaPayload), secret)
+	}
+}
+
 func TestSchedulerCacheSnapshotAccountIDReuseKeepsEmptySnapshotSemantics(t *testing.T) {
 	ctx := context.Background()
 	cache := newSchedulerCacheUnit(t)

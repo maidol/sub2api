@@ -114,13 +114,9 @@ func (s *ClaudeResetCreditService) account(ctx context.Context, id int64) (*Acco
 	if !profile {
 		return nil, "", "", infraerrors.BadRequest("CLAUDE_RESET_PROFILE_SCOPE_REQUIRED", "user:profile scope required")
 	}
-	proxy := ""
-	if a.ProxyID != nil {
-		p, e := s.proxies.GetByID(ctx, *a.ProxyID)
-		if e != nil || p == nil {
-			return nil, "", "", infraerrors.ServiceUnavailable("CLAUDE_RESET_PROXY_UNAVAILABLE", "account proxy unavailable")
-		}
-		proxy = p.URL()
+	proxy, err := resolveAccountProxyURL(ctx, s.proxies, a)
+	if err != nil {
+		return nil, "", "", infraerrors.ServiceUnavailable("CLAUDE_RESET_PROXY_UNAVAILABLE", "account proxy unavailable")
 	}
 	token, err := s.tokens.GetAccessToken(ctx, a)
 	if err != nil || strings.TrimSpace(token) == "" {

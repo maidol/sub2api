@@ -106,11 +106,9 @@ func (s *GrokQuotaService) syncGrokObservedModels(ctx context.Context, account *
 	}
 	account.ApplyHeaderOverrides(req.Header)
 
-	proxyURL := ""
-	if s.proxyRepo != nil && account.ProxyID != nil {
-		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
-		}
+	proxyURL, err := resolveAccountProxyURL(ctx, s.proxyRepo, account)
+	if err != nil {
+		return err
 	}
 	if s.httpUpstream == nil {
 		return nil

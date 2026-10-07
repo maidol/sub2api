@@ -683,12 +683,11 @@ func (r *openCodeGoRefreshPreflightIdentityChangeRepo) GetByID(ctx context.Conte
 	return r.openCodeGoUsageTestRepo.GetByID(ctx, id)
 }
 
-func TestOpenCodeGoUsageRunnerDisablesAutoRefreshAfterIdentityError(t *testing.T) {
+func TestOpenCodeGoUsageRunnerKeepsAutoRefreshAfterProxyLookupFailure(t *testing.T) {
 	account := openCodeGoUsageAccount(14)
 	account.Extra[OpenCodeGoUsageAutoRefreshExtraKey] = true
 	missingProxyID := int64(99)
 	account.ProxyID = &missingProxyID
-	account.Proxy = nil
 	repo := &openCodeGoUsageTestRepo{accounts: map[int64]*Account{14: account}}
 	settingsRepo := &upstreamBillingProbeSettingRepo{values: map[string]string{
 		SettingKeyOpenCodeGoUsageSettings: `{"enabled":true,"interval_minutes":15}`,
@@ -697,12 +696,13 @@ func TestOpenCodeGoUsageRunnerDisablesAutoRefreshAfterIdentityError(t *testing.T
 	svc := newOpenCodeGoUsageTestService(t, repo, upstream, settingsRepo)
 
 	require.NoError(t, svc.RunDue(context.Background()))
-	require.Equal(t, int64(1), repo.disableAutoCalls.Load())
-	require.Equal(t, false, account.Extra[OpenCodeGoUsageAutoRefreshExtraKey])
+	require.Zero(t, repo.disableAutoCalls.Load())
+	require.Equal(t, true, account.Extra[OpenCodeGoUsageAutoRefreshExtraKey])
 	require.Zero(t, upstream.calls.Load())
 
 	require.NoError(t, svc.RunDue(context.Background()))
-	require.Equal(t, int64(1), repo.disableAutoCalls.Load())
+	require.Zero(t, repo.disableAutoCalls.Load())
+	require.Equal(t, true, account.Extra[OpenCodeGoUsageAutoRefreshExtraKey])
 	require.Zero(t, upstream.calls.Load())
 }
 

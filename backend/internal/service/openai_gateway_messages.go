@@ -399,9 +399,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 
 	// 7. Send request
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, err
 	}
 	// Grok may reject encrypted reasoning replayed under a different OAuth
 	// account/cache identity. Match forwardGrokResponses: one strip+retry before

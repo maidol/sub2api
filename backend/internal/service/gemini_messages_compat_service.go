@@ -434,10 +434,22 @@ func (s *GeminiMessagesCompatService) GetAntigravityGatewayService() *Antigravit
 }
 
 func (s *GeminiMessagesCompatService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
+	var (
+		account *Account
+		err     error
+	)
 	if s.schedulerSnapshot != nil {
-		return s.schedulerSnapshot.GetAccount(ctx, accountID)
+		account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
+	} else {
+		account, err = s.accountRepo.GetByID(ctx, accountID)
 	}
-	return s.accountRepo.GetByID(ctx, accountID)
+	if err != nil || account == nil {
+		return account, err
+	}
+	if proxyUnavailableReason(account.ProxyID, account.Proxy, time.Now()) != "" {
+		return nil, nil
+	}
+	return account, nil
 }
 
 func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
@@ -646,9 +658,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
 	originalClaudeBody := body
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, err
 	}
 
 	var requestIDHeader string
@@ -1194,9 +1206,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		mappedModel = account.GetMappedModel(originalModel)
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, err
 	}
 
 	useUpstreamStream := stream
@@ -2877,9 +2889,9 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 	}
 	fullURL := strings.TrimRight(normalizedBaseURL, "/") + path
 
-	var proxyURL string
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)

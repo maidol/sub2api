@@ -230,7 +230,7 @@ func TestOpenAIGatewayForwardRetriesExplicitNativeCompactHTTPFailureOnce(t *test
 }
 
 func compactFallbackManagedProxyAccount() (*Account, *Proxy) {
-	proxy := &Proxy{ID: 10060, Name: "wldsg82-ipv6-10060", Protocol: "http", Host: "proxy.example", Port: 8080}
+	proxy := &Proxy{ID: 10060, Name: "wldsg82-ipv6-10060", Protocol: "http", Host: "proxy.example", Port: 8080, Status: StatusActive}
 	return &Account{
 		ID: 1, Name: "openai-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},

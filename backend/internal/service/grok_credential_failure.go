@@ -170,6 +170,9 @@ func (s *OpenAIGatewayService) getRequestCredential(ctx context.Context, c *gin.
 	if ctx.Err() != nil {
 		return "", "", ctx.Err()
 	}
+	if class.reason == GrokCredentialReasonProxyInvalid {
+		return "", "", s.newGrokCredentialFailover(c, account, class)
+	}
 	if class.permanent || class.transient {
 		freshToken, mutationErr := s.applyGrokCredentialAccountFailure(credentialCtx, account, class)
 		if freshToken != "" {
@@ -487,11 +490,12 @@ func (s *OpenAIGatewayService) validateCurrentGrokCredentialFailure(
 	// A configured proxy is external to the account-row CAS identity. Recheck
 	// the hydrated proxy object so restoring a deleted row under the same ID
 	// wins over a stale proxy-invalid failure.
+	proxyReason := proxyUnavailableReason(latest.ProxyID, latest.Proxy, time.Now())
 	if class.reason == GrokCredentialReasonProxyInvalid {
-		if latest.ProxyID == nil || latest.Proxy != nil {
+		if proxyReason == "" {
 			return "", errOAuthRefreshAccountStateChanged
 		}
-	} else if latest.ProxyID != nil && latest.Proxy == nil {
+	} else if proxyReason != "" {
 		return "", errOAuthRefreshAccountStateChanged
 	}
 
@@ -621,7 +625,7 @@ func (s *OpenAIGatewayService) grokCredentialConcurrentlyRefreshedToken(ctx cont
 	latestSnapshot := grokCredentialMutationSnapshot(latest)
 	if !grokCredentialProxyIDsEqual(latestSnapshot.ProxyID, baseline.ProxyID) ||
 		latestSnapshot.CredentialsJSON == baseline.CredentialsJSON || !latest.IsSchedulable() ||
-		(latest.ProxyID != nil && latest.Proxy == nil) || s.isOpenAIAccountRuntimeBlocked(latest) {
+		proxyUnavailableReason(latest.ProxyID, latest.Proxy, time.Now()) != "" || s.isOpenAIAccountRuntimeBlocked(latest) {
 		return "", false
 	}
 	latestToken := strings.TrimSpace(latest.GetGrokAccessToken())

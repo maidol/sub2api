@@ -1524,6 +1524,9 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 	if err != nil || account == nil {
 		return account, err
 	}
+	if proxyUnavailableReason(account.ProxyID, account.Proxy, time.Now()) != "" {
+		return nil, nil
+	}
 	if s.isAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}

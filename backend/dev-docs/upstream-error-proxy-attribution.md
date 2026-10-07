@@ -55,6 +55,13 @@ account binding:
 - direct fallback: `proxy_id` becomes null and
   `proxy_fallback_origin_id` stores the expired proxy ID.
 
+An expired proxy with `FallbackModeNone` stays bound in storage, and an
+unresolved proxy fallback chain also leaves its account binding unchanged. In
+both cases the expired proxy is not used: the account is excluded from scheduler
+candidates and outbound requests fail over rather than silently connecting
+directly. Disabled or deleted bound proxies follow the same fail-closed request
+behavior until the binding is repaired or changed.
+
 Custom Anthropic relays receive the same snapshotted proxy as their encoded
 relay proxy parameter. OpenAI WebSocket requests keep the existing transport
 behavior: configured account proxies use the proxy client, while an empty

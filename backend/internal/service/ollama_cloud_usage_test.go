@@ -996,13 +996,12 @@ func TestOllamaCloudUsageRunnerHonorsLeaderLockAndBackoff(t *testing.T) {
 	require.LessOrEqual(t, nextOllamaCloudUsageDelay(60, 20, 0), ollamaCloudUsageMaxDelay+5*time.Minute)
 }
 
-func TestOllamaCloudUsageRunnerDisablesAutoRefreshAfterUnpersistableIdentityError(t *testing.T) {
+func TestOllamaCloudUsageRunnerKeepsAutoRefreshAfterProxyLookupFailure(t *testing.T) {
 	account := ollamaUsageAccount(14)
 	account.Extra[OllamaCloudUsageSessionExtraKey] = "cipher:wos-session=secret"
 	account.Extra[OllamaCloudUsageAutoRefreshExtraKey] = true
 	missingProxyID := int64(99)
 	account.ProxyID = &missingProxyID
-	account.Proxy = nil
 	repo := &ollamaUsageTestRepo{upstreamBillingProbeAccountRepo: &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{14: account}}}
 	settingsRepo := &upstreamBillingProbeSettingRepo{values: map[string]string{
 		SettingKeyOllamaCloudUsageSettings: `{"enabled":true,"interval_minutes":60}`,
@@ -1011,12 +1010,13 @@ func TestOllamaCloudUsageRunnerDisablesAutoRefreshAfterUnpersistableIdentityErro
 	svc := newOllamaUsageTestService(t, repo, upstream, settingsRepo, true)
 
 	require.NoError(t, svc.RunDue(context.Background()))
-	require.Equal(t, int64(1), repo.disableAutoCalls.Load())
-	require.Equal(t, false, account.Extra[OllamaCloudUsageAutoRefreshExtraKey])
+	require.Zero(t, repo.disableAutoAttempts.Load())
+	require.Equal(t, true, account.Extra[OllamaCloudUsageAutoRefreshExtraKey])
 	require.Zero(t, upstream.calls.Load())
 
 	require.NoError(t, svc.RunDue(context.Background()))
-	require.Equal(t, int64(1), repo.disableAutoCalls.Load())
+	require.Zero(t, repo.disableAutoAttempts.Load())
+	require.Equal(t, true, account.Extra[OllamaCloudUsageAutoRefreshExtraKey])
 	require.Zero(t, upstream.calls.Load())
 }
 

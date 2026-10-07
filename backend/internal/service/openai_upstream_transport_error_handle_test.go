@@ -218,6 +218,7 @@ func TestForwardAsRawChatCompletions_TransportErrorFailsOver(t *testing.T) {
 		ID:       proxyID,
 		Name:     "oxylabs-uk-8001",
 		Protocol: "http",
+		Status:   StatusActive,
 		Host:     "proxy.example",
 		Port:     8080,
 	}
@@ -262,8 +263,8 @@ func TestForwardAsRawChatCompletions_RecordsProxyPerAccountAttempt(t *testing.T)
 			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
 		}},
 	}
-	proxyA := &Proxy{ID: 10060, Name: "proxy-a", Protocol: "http", Host: "proxy-a.example", Port: 8080}
-	proxyB := &Proxy{ID: 8001, Name: "proxy-b", Protocol: "http", Host: "proxy-b.example", Port: 8080}
+	proxyA := &Proxy{ID: 10060, Name: "proxy-a", Protocol: "http", Host: "proxy-a.example", Port: 8080, Status: StatusActive}
+	proxyB := &Proxy{ID: 8001, Name: "proxy-b", Protocol: "http", Host: "proxy-b.example", Port: 8080, Status: StatusActive}
 	fallbackOriginID := int64(10150)
 	accounts := []*Account{
 		{ID: 81, Name: "account-a", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "a", "base_url": "https://example.com/v1"}, ProxyID: &proxyA.ID, Proxy: proxyA},

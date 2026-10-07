@@ -1102,9 +1102,11 @@ func TestGeminiOAuthService_RefreshAccountToken_WithProxy(t *testing.T) {
 	proxyRepo := &mockGeminiProxyRepo{
 		getByIDFunc: func(ctx context.Context, id int64) (*Proxy, error) {
 			return &Proxy{
+				ID:       id,
 				Protocol: "http",
 				Host:     "proxy.test",
 				Port:     3128,
+				Status:   StatusActive,
 			}, nil
 		},
 	}

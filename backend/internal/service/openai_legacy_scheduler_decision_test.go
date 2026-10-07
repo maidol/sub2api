@@ -208,7 +208,9 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		healthyProxy, quarantinedProxy := int64(38113), int64(38114)
 		accounts := newLegacySchedulerDecisionTestAccounts(groupID, true)
 		accounts[0].ProxyID = &healthyProxy
+		accounts[0].Proxy = &Proxy{ID: healthyProxy, Status: StatusActive}
 		accounts[1].ProxyID = &quarantinedProxy
+		accounts[1].Proxy = &Proxy{ID: quarantinedProxy, Status: StatusActive}
 		svc := newLegacySchedulerDecisionTestService(accounts, false, schedulerTestConcurrencyCache{releasedIDs: &released})
 		svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
 			failureThreshold: 1,
@@ -238,7 +240,9 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		proxy := int64(38115)
 		accounts := newLegacySchedulerDecisionTestAccounts(groupID, true)
 		accounts[0].ProxyID = &proxy
+		accounts[0].Proxy = &Proxy{ID: proxy, Status: StatusActive}
 		accounts[1].ProxyID = &proxy
+		accounts[1].Proxy = &Proxy{ID: proxy, Status: StatusActive}
 		svc := newLegacySchedulerDecisionTestService(accounts, false, schedulerTestConcurrencyCache{})
 		svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
 			failureThreshold: 1,

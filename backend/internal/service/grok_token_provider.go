@@ -185,7 +185,7 @@ func (p *GrokTokenProvider) GetAccessTokenForManualTest(ctx context.Context, acc
 	if account.Platform != PlatformGrok || account.Type != AccountTypeOAuth {
 		return "", errors.New("not a grok oauth account")
 	}
-	if account.ProxyID != nil && account.Proxy == nil {
+	if proxyUnavailableReason(account.ProxyID, account.Proxy, time.Now()) != "" {
 		return "", errGrokOAuthConfiguredProxyMiss
 	}
 	if strings.TrimSpace(account.GetGrokRefreshToken()) == "" {
@@ -316,7 +316,7 @@ func grokOAuthRequestAccountEligibilityError(account *Account) error {
 	if account == nil || !account.IsGrokOAuth() || !account.IsSchedulable() {
 		return errOAuthRefreshAccountStateChanged
 	}
-	if account.ProxyID != nil && account.Proxy == nil {
+	if proxyUnavailableReason(account.ProxyID, account.Proxy, time.Now()) != "" {
 		return errGrokOAuthConfiguredProxyMiss
 	}
 	return nil

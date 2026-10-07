@@ -158,9 +158,11 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 
 	// 获取代理URL（自定义 base URL 模式下，proxy 通过 buildCustomRelayURL 作为查询参数传递）
 	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		if !account.IsCustomBaseURLEnabled() || account.GetCustomBaseURL() == "" {
-			proxyURL = account.Proxy.URL()
+	if !account.IsCustomBaseURLEnabled() || account.GetCustomBaseURL() == "" {
+		proxyURL, err = resolveAccountProxyURL(ctx, nil, account)
+		if err != nil {
+			setOpsUpstreamError(c, http.StatusServiceUnavailable, err.Error(), "")
+			return err
 		}
 	}
 
@@ -284,9 +286,10 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		return err
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		setOpsUpstreamError(c, http.StatusServiceUnavailable, err.Error(), "")
+		return err
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
@@ -481,7 +484,10 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		if err != nil {
 			return nil, nil, err
 		}
-		targetURL = s.buildCustomRelayURL(validatedURL, "/v1/messages/count_tokens", account)
+		targetURL, err = s.buildCustomRelayURL(ctx, validatedURL, "/v1/messages/count_tokens", account)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	clientHeaders := http.Header{}

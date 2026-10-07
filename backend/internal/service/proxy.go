@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net"
 	"net/url"
 	"strconv"
@@ -15,6 +16,29 @@ const (
 
 // ProxyManagedByPool marks a proxy leased from the proxy pool provider.
 const ProxyManagedByPool = "pool"
+
+type proxyGetter interface {
+	GetByID(ctx context.Context, id int64) (*Proxy, error)
+}
+
+func proxyUnavailableReason(proxyID *int64, proxy *Proxy, now time.Time) string {
+	if proxyID == nil {
+		return ""
+	}
+	if proxy == nil {
+		return "deleted"
+	}
+	if proxy.ID != *proxyID {
+		return "mismatch"
+	}
+	if proxy.Status != StatusActive {
+		return "inactive"
+	}
+	if proxy.IsExpired(now) {
+		return "expired"
+	}
+	return ""
+}
 
 type Proxy struct {
 	ID             int64

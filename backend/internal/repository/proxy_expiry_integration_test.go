@@ -52,6 +52,25 @@ func (s *ProxyExpirySuite) accountProxyID(id int64) *int64 {
 	return pid
 }
 
+func (s *ProxyExpirySuite) TestDelete_EnqueuesBoundAccountChanges() {
+	pid := s.mkProxy("p-delete", service.FallbackModeNone, nil, nil)
+	aid := s.mkAccountWithProxy(pid)
+
+	s.Require().NoError(s.repo.Delete(s.ctx, pid))
+
+	var payloadRaw []byte
+	err := scanSingleRow(s.ctx, s.tx, `
+		SELECT payload FROM scheduler_outbox
+		WHERE event_type=$1 ORDER BY id DESC LIMIT 1`,
+		[]any{service.SchedulerOutboxEventAccountBulkChanged}, &payloadRaw)
+	s.Require().NoError(err)
+	var payload struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	s.Require().NoError(json.Unmarshal(payloadRaw, &payload))
+	s.Require().Equal([]int64{aid}, payload.AccountIDs)
+}
+
 func (s *ProxyExpirySuite) TestSweep_DirectMode() {
 	past := time.Now().Add(-time.Hour)
 	pid := s.mkProxy("p-direct", service.FallbackModeDirect, &past, nil)
@@ -82,20 +101,27 @@ func (s *ProxyExpirySuite) TestSweep_EnqueuesChangedAccountIDsWithoutFullRebuild
 	s.Require().NoError(err)
 	s.Require().EqualValues(2, changed)
 
-	var payloadRaw []byte
-	err = scanSingleRow(s.ctx, s.tx, `
+	rows, err := s.tx.QueryContext(s.ctx, `
 		SELECT payload
 		FROM scheduler_outbox
 		WHERE event_type=$1
-		ORDER BY id DESC
-		LIMIT 1`, []any{service.SchedulerOutboxEventAccountBulkChanged}, &payloadRaw)
+		ORDER BY id`, service.SchedulerOutboxEventAccountBulkChanged)
 	s.Require().NoError(err)
+	defer func() { s.Require().NoError(rows.Close()) }()
 
-	var payload struct {
-		AccountIDs []int64 `json:"account_ids"`
+	var changedAccountIDs []int64
+	for rows.Next() {
+		var payloadRaw []byte
+		s.Require().NoError(rows.Scan(&payloadRaw))
+		var payload struct {
+			AccountIDs []int64 `json:"account_ids"`
+		}
+		s.Require().NoError(json.Unmarshal(payloadRaw, &payload))
+		s.Require().NotEmpty(payload.AccountIDs)
+		changedAccountIDs = append(changedAccountIDs, payload.AccountIDs...)
 	}
-	s.Require().NoError(json.Unmarshal(payloadRaw, &payload))
-	s.Require().Equal([]int64{firstAccountID, secondAccountID}, payload.AccountIDs)
+	s.Require().NoError(rows.Err())
+	s.Require().ElementsMatch([]int64{firstAccountID, secondAccountID}, changedAccountIDs)
 
 	var fullRebuildCount int
 	err = scanSingleRow(s.ctx, s.tx, `
@@ -133,6 +159,17 @@ func (s *ProxyExpirySuite) TestSweep_NoneMode_KeepsAccount() {
 	got, _ := s.repo.GetByID(s.ctx, pid)
 	s.Require().Equal(service.StatusExpired, got.Status)
 	s.Require().Equal(pid, *s.accountProxyID(aid))
+	var payloadRaw []byte
+	err = scanSingleRow(s.ctx, s.tx, `
+		SELECT payload FROM scheduler_outbox
+		WHERE event_type=$1 ORDER BY id DESC LIMIT 1`,
+		[]any{service.SchedulerOutboxEventAccountBulkChanged}, &payloadRaw)
+	s.Require().NoError(err)
+	var payload struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	s.Require().NoError(json.Unmarshal(payloadRaw, &payload))
+	s.Require().Equal([]int64{aid}, payload.AccountIDs)
 	var origin *int64
 	err = scanSingleRow(s.ctx, s.tx, `SELECT proxy_fallback_origin_id FROM accounts WHERE id=$1`, []any{aid}, &origin)
 	s.Require().NoError(err)

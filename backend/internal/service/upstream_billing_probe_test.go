@@ -980,10 +980,9 @@ func TestUpstreamBillingProbeNeverDowngradesMissingConfiguredProxyToDirect(t *te
 		name       string
 		proxy      *Proxy
 		wantReason string
-		wantErr    error
 	}{
-		{name: "missing hydrated proxy", wantReason: "proxy_unavailable"},
-		{name: "mismatched hydrated proxy", proxy: &Proxy{ID: 8, Protocol: "http", Host: "127.0.0.1", Port: 8080}, wantErr: ErrUpstreamBillingProbeIdentityChanged},
+		{name: "missing hydrated proxy", wantReason: "proxy_unavailable_lookup-failed"},
+		{name: "mismatched hydrated proxy", proxy: &Proxy{ID: 8, Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: StatusActive}, wantReason: "proxy_unavailable_mismatch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := &Account{
@@ -1001,18 +1000,12 @@ func TestUpstreamBillingProbeNeverDowngradesMissingConfiguredProxyToDirect(t *te
 			svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
 
 			snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
-			if tc.wantErr != nil {
-				require.ErrorIs(t, err, tc.wantErr)
-				require.Nil(t, snapshot)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, UpstreamBillingProbeStatusFailed, snapshot.Status)
-				require.Equal(t, tc.wantReason, snapshot.LastError)
-			}
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, tc.wantReason, string(failoverErr.Reason))
+			require.Nil(t, snapshot)
 			require.Zero(t, upstream.calls.Load())
-			if tc.wantErr != nil {
-				require.NotContains(t, account.Extra, UpstreamBillingProbeExtraKey)
-			}
+			require.NotContains(t, account.Extra, UpstreamBillingProbeExtraKey)
 		})
 	}
 }

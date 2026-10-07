@@ -225,7 +225,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return derefAccounts(cached), useMixed, nil
+			return filterSchedulableProxyAccounts(derefAccounts(cached)), useMixed, nil
 		}
 		token, err := s.cache.CaptureBucketWriteToken(ctx, bucket)
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -268,7 +268,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		}
 	}
 
-	return accounts, useMixed, nil
+	return filterSchedulableProxyAccounts(accounts), useMixed, nil
 }
 
 func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (*Account, error) {
@@ -321,6 +321,22 @@ func (s *SchedulerSnapshotService) GetGroupByIDLite(ctx context.Context, groupID
 func (s *SchedulerSnapshotService) UpdateAccountInCache(ctx context.Context, account *Account) error {
 	if s.cache == nil || account == nil {
 		return nil
+	}
+	if account.ProxyID != nil && (account.Proxy == nil || account.Proxy.ID != *account.ProxyID) {
+		if s.accountRepo == nil {
+			return fmt.Errorf("reload account %d with bound proxy before scheduler cache update: account repository unavailable", account.ID)
+		}
+		reloaded, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil {
+			return fmt.Errorf("reload account %d with bound proxy before scheduler cache update: %w", account.ID, err)
+		}
+		if reloaded == nil {
+			return fmt.Errorf("reload account %d with bound proxy before scheduler cache update: account not found", account.ID)
+		}
+		if reloaded.ProxyID != nil && (reloaded.Proxy == nil || reloaded.Proxy.ID != *reloaded.ProxyID) {
+			return fmt.Errorf("reload account %d with bound proxy before scheduler cache update: proxy relation unavailable or mismatched", account.ID)
+		}
+		account = reloaded
 	}
 	return s.cache.SetAccount(ctx, account)
 }
@@ -1650,6 +1666,21 @@ func dedupeBuckets(in []SchedulerBucket) []SchedulerBucket {
 		out = append(out, bucket)
 	}
 	return out
+}
+
+func filterSchedulableProxyAccounts(accounts []Account) []Account {
+	if len(accounts) == 0 {
+		return []Account{}
+	}
+	now := time.Now()
+	filtered := make([]Account, 0, len(accounts))
+	for _, account := range accounts {
+		if proxyUnavailableReason(account.ProxyID, account.Proxy, now) != "" {
+			continue
+		}
+		filtered = append(filtered, account)
+	}
+	return filtered
 }
 
 func derefAccounts(accounts []*Account) []Account {

@@ -788,6 +788,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return err
+	}
 	baseAcquireReq := openAIWSAcquireRequest{
 		Account: account,
 		WSURL:   wsURL,
@@ -795,12 +799,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		ProxyURL:     proxyURL,
 		ForceNewConn: false,
 	}
 	pool := s.getOpenAIWSConnPool()
@@ -903,7 +902,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				forcePreferredConn,
 				wsHost,
 				wsPath,
-				account.ProxyID != nil && account.Proxy != nil,
+				proxyURL != "",
 			)
 			var dialErr *openAIWSDialError
 			if errors.As(acquireErr, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {

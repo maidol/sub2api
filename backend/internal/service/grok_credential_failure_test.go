@@ -715,7 +715,7 @@ func TestGetRequestCredentialMapsTransientAndProviderFailuresSeparately(t *testi
 		account := expiredGrokOAuthAccountForCredentialTest(711)
 		proxyID := int64(43)
 		account.ProxyID = &proxyID
-		account.Proxy = &Proxy{}
+		account.Proxy = &Proxy{ID: proxyID, Status: StatusActive}
 		repo := &tokenRefreshAccountRepo{}
 		repo.accountsByID = map[int64]*Account{account.ID: account}
 		cache := &grokTokenCacheForProviderTest{lockResult: true}
@@ -738,34 +738,31 @@ func TestGetRequestCredentialMapsTransientAndProviderFailuresSeparately(t *testi
 		require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 	})
 
-	t.Run("proxy repository read failure stops without account mutation", func(t *testing.T) {
+	t.Run("missing hydrated proxy stops before account mutation", func(t *testing.T) {
 		account := expiredGrokOAuthAccountForCredentialTest(709)
 		proxyID := int64(41)
 		account.ProxyID = &proxyID
-		account.Proxy = &Proxy{}
 		repo := &tokenRefreshAccountRepo{}
 		repo.accountsByID = map[int64]*Account{account.ID: account}
 		cache := &grokTokenCacheForProviderTest{lockResult: true}
-		oauthSvc := NewGrokOAuthService(&grokCredentialProxyRepoStub{err: errors.New("database temporarily unavailable")}, &grokOAuthClientStub{})
-		defer oauthSvc.Stop()
 		provider := NewGrokTokenProvider(repo, cache)
-		provider.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache), NewGrokTokenRefresher(oauthSvc))
+		provider.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache), &tokenRefresherStub{err: errors.New("unexpected refresh")})
 		svc := &OpenAIGatewayService{accountRepo: repo, grokTokenProvider: provider}
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 
 		_, _, err := svc.getRequestCredential(context.Background(), c, account)
 		var failoverErr *UpstreamFailoverError
 		require.ErrorAs(t, err, &failoverErr)
-		require.Equal(t, GatewayFailureScopeProvider, failoverErr.Scope)
-		require.Equal(t, GrokCredentialReasonProviderDown, failoverErr.Reason)
-		require.Equal(t, NextAccountStop, failoverErr.NextAccountAction)
+		require.Equal(t, GatewayFailureScopeAccount, failoverErr.Scope)
+		require.Equal(t, GrokCredentialReasonProxyInvalid, failoverErr.Reason)
+		require.Equal(t, NextAccountRetry, failoverErr.NextAccountAction)
 		require.Zero(t, repo.setErrorCalls)
 		require.Zero(t, repo.setTempUnschedCalls)
 		require.Empty(t, cache.deletedKeys)
 		require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 	})
 
-	t.Run("structurally missing configured proxy permanently blocks only that account", func(t *testing.T) {
+	t.Run("structurally missing configured proxy fails closed without account mutation", func(t *testing.T) {
 		account := expiredGrokOAuthAccountForCredentialTest(710)
 		account.Status = StatusActive
 		account.Schedulable = true
@@ -788,11 +785,11 @@ func TestGetRequestCredentialMapsTransientAndProviderFailuresSeparately(t *testi
 		require.Equal(t, GatewayFailureScopeAccount, failoverErr.Scope)
 		require.Equal(t, GrokCredentialReasonProxyInvalid, failoverErr.Reason)
 		require.Equal(t, NextAccountRetry, failoverErr.NextAccountAction)
-		require.Equal(t, 1, baseRepo.setErrorCalls)
-		require.Equal(t, StatusError, account.Status)
-		require.False(t, account.Schedulable)
-		require.Equal(t, []string{GrokTokenCacheKey(account)}, cache.deletedKeys)
-		require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+		require.Zero(t, baseRepo.setErrorCalls)
+		require.Equal(t, StatusActive, account.Status)
+		require.True(t, account.Schedulable)
+		require.Empty(t, cache.deletedKeys)
+		require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 	})
 }
 
@@ -819,7 +816,7 @@ func TestGetRequestCredentialRuntimeBlockWinsBeforeWarmTokenCache(t *testing.T) 
 	require.Zero(t, repo.setTempUnschedCalls)
 }
 
-func TestGetRequestCredentialWarmCachedAccessWithMissingConfiguredProxyPermanentlyFailsOver(t *testing.T) {
+func TestGetRequestCredentialWarmCachedAccessWithMissingConfiguredProxyFailsClosed(t *testing.T) {
 	account := expiredGrokOAuthAccountForCredentialTest(715)
 	account.Credentials["access_token"] = "valid-access"
 	account.Credentials["expires_at"] = time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
@@ -843,9 +840,10 @@ func TestGetRequestCredentialWarmCachedAccessWithMissingConfiguredProxyPermanent
 	require.Equal(t, GrokCredentialReasonProxyInvalid, failoverErr.Reason)
 	require.Equal(t, NextAccountRetry, failoverErr.NextAccountAction)
 	require.Zero(t, refresher.refreshCalls)
-	require.Equal(t, 1, baseRepo.setErrorCalls)
-	require.Equal(t, []string{GrokTokenCacheKey(account)}, cache.deletedKeys)
-	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	require.Zero(t, baseRepo.setErrorCalls)
+	require.Empty(t, cache.deletedKeys)
+	require.Equal(t, StatusActive, account.Status)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
 func TestGetRequestCredentialCancellationAndBudgetDoNotMutateAccount(t *testing.T) {
@@ -1431,7 +1429,7 @@ func TestCredentialFailureConditionalMutationLosesToConcurrentProxyRepair(t *tes
 			account := expiredGrokOAuthAccountForCredentialTest(int64(780 + index))
 			oldProxyID := int64(10)
 			account.ProxyID = &oldProxyID
-			account.Proxy = &Proxy{}
+			account.Proxy = &Proxy{ID: oldProxyID, Status: StatusActive}
 			repo := &tokenRefreshAccountRepo{}
 			repo.accountsByID = map[int64]*Account{account.ID: account}
 			repo.beforeConditionalState = func() {
@@ -1461,7 +1459,7 @@ func TestCredentialFailureConditionalMutationLosesToConcurrentProxyRepair(t *tes
 	}
 }
 
-func TestCredentialFailureConditionalMutationLosesToSameIDProxyRestoration(t *testing.T) {
+func TestCredentialFailureMissingHydratedProxyFailsClosedBeforeStateMutation(t *testing.T) {
 	account := expiredGrokOAuthAccountForCredentialTest(790)
 	proxyID := int64(10)
 	account.ProxyID = &proxyID
@@ -1480,7 +1478,7 @@ func TestCredentialFailureConditionalMutationLosesToSameIDProxyRestoration(t *te
 
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, GrokCredentialReasonAccountChanged, failoverErr.Reason)
+	require.Equal(t, GrokCredentialReasonProxyInvalid, failoverErr.Reason)
 	require.Equal(t, NextAccountRetry, failoverErr.NextAccountAction)
 	require.Zero(t, repo.setErrorCalls)
 	require.Zero(t, repo.setTempUnschedCalls)

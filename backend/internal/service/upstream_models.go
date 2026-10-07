@@ -544,7 +544,11 @@ func (s *AccountTestService) fetchModelsDevRegistry(ctx context.Context, account
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := s.doUpstreamModelsRequest(req, upstreamModelsProxyURL(account), account)
+	proxyURL, err := upstreamModelsProxyURL(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.doUpstreamModelsRequest(req, proxyURL, account)
 	if err != nil {
 		return nil, err
 	}
@@ -746,7 +750,10 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 		return nil, nil, err
 	}
 
-	proxyURL := upstreamModelsProxyURL(account)
+	proxyURL, err := upstreamModelsProxyURL(ctx, account)
+	if err != nil {
+		return nil, nil, newUpstreamModelSyncUpstreamError("Configured proxy is unavailable", err)
+	}
 	resp, err := s.doUpstreamModelsRequest(req, proxyURL, account)
 	if err != nil {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Failed to request upstream model list", err)
@@ -1166,7 +1173,11 @@ func (s *AccountTestService) fetchAntigravityOAuthUpstreamModels(ctx context.Con
 		return nil, newUpstreamModelSyncConfigError("No Antigravity access token is available", nil)
 	}
 
-	client, err := antigravity.NewClient(upstreamModelsProxyURL(account))
+	proxyURL, err := upstreamModelsProxyURL(ctx, account)
+	if err != nil {
+		return nil, newUpstreamModelSyncUpstreamError("Configured proxy is unavailable", err)
+	}
+	client, err := antigravity.NewClient(proxyURL)
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Failed to configure Antigravity client", err)
 	}
@@ -1197,11 +1208,8 @@ func (s *AccountTestService) doUpstreamModelsRequest(req *http.Request, proxyURL
 	return s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 }
 
-func upstreamModelsProxyURL(account *Account) string {
-	if account != nil && account.ProxyID != nil && account.Proxy != nil {
-		return account.Proxy.URL()
-	}
-	return ""
+func upstreamModelsProxyURL(ctx context.Context, account *Account) (string, error) {
+	return resolveAccountProxyURL(ctx, nil, account)
 }
 
 func buildV1ModelsURL(base string) string {

@@ -1678,6 +1678,9 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	if err != nil || account == nil {
 		return account, err
 	}
+	if proxyUnavailableReason(account.ProxyID, account.Proxy, time.Now()) != "" {
+		return nil, nil
+	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}

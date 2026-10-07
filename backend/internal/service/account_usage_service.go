@@ -965,9 +965,9 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	enforceCodexIdentityHeadersWithUA(req.Header, account.GetOpenAIUserAgent())
 	setOpenAIChatGPTAccountHeaders(req.Header, account)
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve openai probe proxy: %w", err)
 	}
 	client, err := httppool.GetClient(httppool.Options{
 		ProxyURL:              proxyURL,
@@ -1145,8 +1145,11 @@ func (s *AccountUsageService) getAntigravityUsage(ctx context.Context, account *
 		fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer fetchCancel()
 
-		proxyURL := s.antigravityQuotaFetcher.GetProxyURL(fetchCtx, account)
-		fetchResult, err := s.antigravityQuotaFetcher.FetchQuota(fetchCtx, account, proxyURL)
+		proxyURL, err := s.antigravityQuotaFetcher.GetProxyURL(fetchCtx, account)
+		var fetchResult *QuotaResult
+		if err == nil {
+			fetchResult, err = s.antigravityQuotaFetcher.FetchQuota(fetchCtx, account, proxyURL)
+		}
 		if err != nil {
 			degraded := buildAntigravityDegradedUsage(err)
 			enrichUsageWithAccountError(degraded, account)
@@ -1671,9 +1674,9 @@ func (s *AccountUsageService) fetchOAuthUsageRaw(ctx context.Context, account *A
 		return nil, fmt.Errorf("no access token available")
 	}
 
-	var proxyURL string
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve usage proxy: %w", err)
 	}
 
 	// 构建完整的选项

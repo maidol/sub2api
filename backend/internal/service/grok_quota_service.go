@@ -501,7 +501,10 @@ func (s *GrokQuotaService) prepareProbe(ctx context.Context, accountID int64) (*
 	if err != nil {
 		return nil, "", "", err
 	}
-	proxyURL := s.resolveProxyURL(ctx, account)
+	proxyURL, err := s.resolveProxyURL(ctx, account)
+	if err != nil {
+		return nil, "", "", infraerrors.Newf(http.StatusBadGateway, "GROK_QUOTA_PROXY_UNAVAILABLE", "configured proxy is unavailable: %v", err)
+	}
 
 	// Quota diagnostics must remain available while scheduling is paused (for
 	// example after a 402). Use the same credential checks and refresh protocol
@@ -517,20 +520,12 @@ func (s *GrokQuotaService) prepareProbe(ctx context.Context, accountID int64) (*
 	return account, token, proxyURL, nil
 }
 
-func (s *GrokQuotaService) resolveProxyURL(ctx context.Context, account *Account) string {
-	if account == nil || account.ProxyID == nil {
-		return ""
+func (s *GrokQuotaService) resolveProxyURL(ctx context.Context, account *Account) (string, error) {
+	var proxies proxyGetter
+	if s != nil {
+		proxies = s.proxyRepo
 	}
-	switch {
-	case account.Proxy != nil:
-		return account.Proxy.URL()
-	case s != nil && s.proxyRepo != nil:
-		if proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && proxy != nil {
-			account.Proxy = proxy
-			return proxy.URL()
-		}
-	}
-	return ""
+	return resolveAccountProxyURL(ctx, proxies, account)
 }
 
 func (s *GrokQuotaService) loadGrokOAuthAccount(ctx context.Context, accountID int64) (*Account, error) {

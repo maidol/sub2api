@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/subtle"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -433,23 +432,11 @@ func (s *GrokOAuthService) tokenInfoFromResponse(tokenResp *xai.TokenResponse, c
 }
 
 func (s *GrokOAuthService) proxyURL(ctx context.Context, proxyID *int64) (string, error) {
-	if proxyID == nil {
-		return "", nil
-	}
-	if s.proxyRepo == nil {
-		return "", infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_PROXY_NOT_AVAILABLE", "proxy repository is not available")
-	}
-	proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
+	proxyURL, err := resolveAccountProxyURL(ctx, s.proxyRepo, &Account{ProxyID: proxyID})
 	if err != nil {
-		if errors.Is(err, ErrProxyNotFound) {
-			return "", infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_PROXY_NOT_FOUND", "configured proxy was not found")
-		}
-		return "", infraerrors.New(http.StatusServiceUnavailable, "GROK_OAUTH_PROXY_LOOKUP_FAILED", "proxy lookup is temporarily unavailable")
+		return "", infraerrors.New(http.StatusServiceUnavailable, "GROK_OAUTH_PROXY_UNAVAILABLE", "configured proxy is unavailable")
 	}
-	if proxy == nil {
-		return "", infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_PROXY_NOT_FOUND", "configured proxy was not found")
-	}
-	return proxy.URL(), nil
+	return proxyURL, nil
 }
 
 func applyGrokTokenClaims(info *GrokTokenInfo, token string, includeTier bool) {

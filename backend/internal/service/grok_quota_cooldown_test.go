@@ -58,12 +58,13 @@ func TestGrokQuotaQueryRemainsAvailableWhileSchedulingIsPaused(t *testing.T) {
 
 func TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown(t *testing.T) {
 	cases := []struct {
-		name       string
-		invalidate func(*Account)
+		name          string
+		invalidate    func(*Account)
+		wantErrReason string
 	}{
-		{"missing refresh token", func(a *Account) { delete(a.Credentials, "refresh_token") }},
-		{"expired access token without refresh service", func(a *Account) { a.Credentials["expires_at"] = time.Now().Add(-time.Hour).Format(time.RFC3339) }},
-		{"missing configured proxy", func(a *Account) { id := int64(42); a.ProxyID = &id }},
+		{"missing refresh token", func(a *Account) { delete(a.Credentials, "refresh_token") }, "GROK_QUOTA_TOKEN_UNAVAILABLE"},
+		{"expired access token without refresh service", func(a *Account) { a.Credentials["expires_at"] = time.Now().Add(-time.Hour).Format(time.RFC3339) }, "GROK_QUOTA_TOKEN_UNAVAILABLE"},
+		{"missing configured proxy", func(a *Account) { id := int64(42); a.ProxyID = &id }, "GROK_QUOTA_PROXY_UNAVAILABLE"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,7 +76,7 @@ func TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown(t *tes
 			upstream := &grokHybridUpstream{}
 			svc := NewGrokQuotaService(repo, nil, NewGrokTokenProvider(repo, nil), upstream, nil)
 			_, err := svc.ProbeBilling(context.Background(), account.ID)
-			require.ErrorContains(t, err, "GROK_QUOTA_TOKEN_UNAVAILABLE")
+			require.ErrorContains(t, err, tc.wantErrReason)
 			requests, _ := upstream.snapshot()
 			require.Empty(t, requests)
 		})

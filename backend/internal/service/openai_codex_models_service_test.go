@@ -2884,7 +2884,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheKeyIsolatesRequestIdentity(t *testin
 	proxyID := int64(9)
 	differentProxy := newCodexModelsAPIKeyTestAccount("https://upstream.example")
 	differentProxy.ProxyID = &proxyID
-	differentProxy.Proxy = &Proxy{Protocol: "http", Host: "127.0.0.1", Port: 8080}
+	differentProxy.Proxy = &Proxy{ID: proxyID, Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: StatusActive}
 	fetch(differentProxy, "0.144.0")
 	fetch(differentProxy, "0.144.0")
 

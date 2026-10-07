@@ -96,12 +96,9 @@ func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope strin
 	}
 
 	// Get proxy URL if specified
-	var proxyURL string
-	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
-		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
-		}
+	proxyURL, err := resolveAccountProxyURL(ctx, s.proxyRepo, &Account{ProxyID: proxyID})
+	if err != nil {
+		return nil, err
 	}
 
 	// Store session
@@ -154,9 +151,10 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 	// Get proxy URL
 	proxyURL := session.ProxyURL
 	if input.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
-		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
+		var err error
+		proxyURL, err = resolveAccountProxyURL(ctx, s.proxyRepo, &Account{ProxyID: input.ProxyID})
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -185,12 +183,9 @@ type CookieAuthInput struct {
 // CookieAuth performs OAuth using sessionKey (cookie-based auto-auth)
 func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (*TokenInfo, error) {
 	// Get proxy URL if specified
-	var proxyURL string
-	if input.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
-		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
-		}
+	proxyURL, err := resolveAccountProxyURL(ctx, s.proxyRepo, &Account{ProxyID: input.ProxyID})
+	if err != nil {
+		return nil, err
 	}
 
 	// Determine scope and if this is a setup token
@@ -309,12 +304,9 @@ func (s *OAuthService) RefreshAccountToken(ctx context.Context, account *Account
 		return nil, fmt.Errorf("no refresh token available")
 	}
 
-	var proxyURL string
-	if account.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
-		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
-		}
+	proxyURL, err := resolveAccountProxyURL(ctx, s.proxyRepo, account)
+	if err != nil {
+		return nil, err
 	}
 
 	return s.RefreshToken(ctx, refreshToken, proxyURL)

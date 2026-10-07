@@ -176,7 +176,10 @@ func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, accou
 	}
 	targetURL = validatedURL
 
-	proxyURL := s.resolveProxyURL(ctx, account)
+	proxyURL, err := s.resolveProxyURL(ctx, account)
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusBadGateway, "CN_QUOTA_PROXY_UNAVAILABLE", "configured proxy is unavailable: %v", err)
+	}
 	callCtx, cancel := context.WithTimeout(ctx, cnQuotaUpstreamTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(callCtx, http.MethodGet, targetURL, nil)
@@ -306,20 +309,12 @@ func validateCodingPlanAccount(account *Account) error {
 	return nil
 }
 
-func (s *CNProviderQuotaService) resolveProxyURL(ctx context.Context, account *Account) string {
-	if account == nil || account.ProxyID == nil {
-		return ""
+func (s *CNProviderQuotaService) resolveProxyURL(ctx context.Context, account *Account) (string, error) {
+	var proxies proxyGetter
+	if s != nil {
+		proxies = s.proxyRepo
 	}
-	if account.Proxy != nil {
-		return account.Proxy.URL()
-	}
-	if s != nil && s.proxyRepo != nil {
-		if proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && proxy != nil {
-			account.Proxy = proxy
-			return proxy.URL()
-		}
-	}
-	return ""
+	return resolveAccountProxyURL(ctx, proxies, account)
 }
 
 // zhipuQuotaURL 根据 base_url 解析智谱额度端点（与数据面推理域名同主机）。

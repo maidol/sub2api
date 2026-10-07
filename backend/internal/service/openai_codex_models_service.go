@@ -1766,9 +1766,9 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	}
 	headers.Set("Version", headerVersion)
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_PROXY_UNAVAILABLE", "configured proxy is unavailable: %v", err)
 	}
 
 	request := openAIModelsRequest{

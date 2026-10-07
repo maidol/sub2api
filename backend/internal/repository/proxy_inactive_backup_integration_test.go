@@ -3,8 +3,10 @@
 package repository
 
 import (
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	"encoding/json"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 func (s *ProxyExpirySuite) TestSweep_SkipsInactiveBackup() {
@@ -32,6 +34,17 @@ func (s *ProxyExpirySuite) TestSweep_SkipsInactiveBackup() {
 			} else {
 				s.Equal(&source, s.accountProxyID(account))
 			}
+			var payloadRaw []byte
+			err = scanSingleRow(s.ctx, s.tx, `
+				SELECT payload FROM scheduler_outbox
+				WHERE event_type=$1 ORDER BY id DESC LIMIT 1`,
+				[]any{service.SchedulerOutboxEventAccountBulkChanged}, &payloadRaw)
+			s.Require().NoError(err)
+			var payload struct {
+				AccountIDs []int64 `json:"account_ids"`
+			}
+			s.Require().NoError(json.Unmarshal(payloadRaw, &payload))
+			s.Equal([]int64{account}, payload.AccountIDs)
 			got, err := s.repo.GetByID(s.ctx, backup)
 			s.Require().NoError(err)
 			s.Equal("inactive", got.Status, "fallback traversal must not reactivate disabled proxies")

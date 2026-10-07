@@ -247,12 +247,16 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
 	}
 
+	proxyURL, err := antigravityCompatProxyURL(ctx, account)
+	if err != nil {
+		return nil, err
+	}
 	request.reasoningEffort = ApplyThinkingEnabledFallback(request.reasoningEffort, request.originalBody, mappedModel)
 	return &antigravityCompatUpstreamCall{
 		request:      request,
 		billingModel: mappedModel,
 		prefix:       logPrefix(getSessionID(c), account.Name),
-		proxyURL:     antigravityCompatProxyURL(account),
+		proxyURL:     proxyURL,
 		accessToken:  accessToken,
 		geminiBody:   geminiBody,
 	}, nil
@@ -359,11 +363,8 @@ func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
 	return json.Marshal(request)
 }
 
-func antigravityCompatProxyURL(account *Account) string {
-	if account.ProxyID == nil || account.Proxy == nil {
-		return ""
-	}
-	return account.Proxy.URL()
+func antigravityCompatProxyURL(ctx context.Context, account *Account) (string, error) {
+	return resolveAccountProxyURL(ctx, nil, account)
 }
 
 func (s *AntigravityGatewayService) handleAntigravityCompatTransportError(c *gin.Context, err error) error {

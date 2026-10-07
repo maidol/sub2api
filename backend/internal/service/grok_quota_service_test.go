@@ -626,6 +626,7 @@ func TestGrokQuotaServiceProbeUsageLoadsProxyWhenAccountEdgeMissing(t *testing.T
 				Protocol: "http",
 				Host:     "proxy.test",
 				Port:     3128,
+				Status:   StatusActive,
 			},
 		},
 	}

@@ -185,10 +185,13 @@ func (s *GatewayService) handleWebSearchEmulation(
 }
 
 func doWebSearch(ctx context.Context, account *Account, query string) (*websearch.SearchResponse, string, error) {
-	proxyURL := resolveAccountProxyURL(account)
 	mgr := getWebSearchManager()
 	if mgr == nil {
 		return nil, "", fmt.Errorf("web search emulation: manager not initialized")
+	}
+	proxyURL, err := resolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, "", err
 	}
 	resp, providerName, err := mgr.SearchWithBestProvider(ctx, websearch.SearchRequest{
 		Query: query, MaxResults: webSearchDefaultMaxResults, ProxyURL: proxyURL,
@@ -200,11 +203,56 @@ func doWebSearch(ctx context.Context, account *Account, query string) (*websearc
 	return resp, providerName, nil
 }
 
-func resolveAccountProxyURL(account *Account) string {
-	if account.ProxyID != nil && account.Proxy != nil {
-		return account.Proxy.URL()
+func resolveAccountProxyURL(ctx context.Context, proxies proxyGetter, account *Account) (string, error) {
+	if account == nil || account.ProxyID == nil {
+		return "", nil
 	}
-	return ""
+
+	var proxy *Proxy
+	if account.Proxy != nil {
+		proxy = account.Proxy
+	} else {
+		if proxies == nil {
+			return "", proxyUnavailableFailoverError(ctx, account, "lookup-failed")
+		}
+		var err error
+		proxy, err = proxies.GetByID(ctx, *account.ProxyID)
+		if err != nil {
+			reason := "lookup-failed"
+			if errors.Is(err, ErrProxyNotFound) {
+				reason = "deleted"
+			}
+			return "", proxyUnavailableFailoverError(ctx, account, reason)
+		}
+		if proxy != nil && proxy.ID == *account.ProxyID {
+			account.Proxy = proxy
+		}
+	}
+
+	if reason := proxyUnavailableReason(account.ProxyID, proxy, time.Now()); reason != "" {
+		return "", proxyUnavailableFailoverError(ctx, account, reason)
+	}
+	return proxy.URL(), nil
+}
+
+func proxyUnavailableFailoverError(ctx context.Context, account *Account, reason string) *UpstreamFailoverError {
+	proxyID := int64(0)
+	if account.ProxyID != nil {
+		proxyID = *account.ProxyID
+	}
+	slog.Warn("gateway.proxy_unavailable",
+		"account_id", account.ID,
+		"proxy_id", proxyID,
+		"reason", reason,
+	)
+	return &UpstreamFailoverError{
+		StatusCode:        http.StatusServiceUnavailable,
+		Reason:            GatewayFailureReason("proxy_unavailable_" + reason),
+		Scope:             GatewayFailureScopeAccount,
+		NextAccountAction: NextAccountRetry,
+		ClientStatusCode:  http.StatusServiceUnavailable,
+		ClientMessage:     "configured proxy is unavailable",
+	}
 }
 
 // --- SSE streaming response ---

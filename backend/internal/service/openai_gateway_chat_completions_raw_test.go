@@ -757,7 +757,7 @@ func TestForwardAsRawChatCompletions_TruncationFailoverAttributesManagedProxy(t 
 		Body:       io.NopCloser(strings.NewReader("")),
 	}}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
-	proxy := &Proxy{ID: 8001, Name: "oxylabs-uk-8001", Protocol: "http", Host: "proxy.example", Port: 8080}
+	proxy := &Proxy{ID: 8001, Name: "oxylabs-uk-8001", Protocol: "http", Host: "proxy.example", Port: 8080, Status: StatusActive}
 	account := rawChatCompletionsTestAccount()
 	account.ProxyID = &proxy.ID
 	account.Proxy = proxy

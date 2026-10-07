@@ -585,9 +585,9 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	account.ApplyHeaderOverrides(req.Header)
 
 	// Get proxy URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
@@ -657,9 +657,9 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
@@ -743,9 +743,9 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 		}
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, nil)
@@ -933,9 +933,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	credentialAccount.ApplyHeaderOverrides(req.Header)
 
 	// Get proxy URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 
 	resp, err := s.doOpenAIAccountTestUpstream(req, proxyURL, account, true)
@@ -1110,11 +1110,8 @@ func (s *AccountTestService) grokTestAccessToken(ctx context.Context, account *A
 	}
 }
 
-func (s *AccountTestService) grokTestProxyURL(account *Account) string {
-	if account.ProxyID != nil && account.Proxy != nil {
-		return account.Proxy.URL()
-	}
-	return ""
+func (s *AccountTestService) grokTestProxyURL(ctx context.Context, account *Account) (string, error) {
+	return resolveAccountProxyURL(ctx, nil, account)
 }
 
 func (s *AccountTestService) prepareGrokTestSSE(c *gin.Context) {
@@ -1255,7 +1252,11 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 	}
 	s.applyGrokTestRequestHeaders(req, account, authToken, "application/json, text/event-stream")
 
-	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
+	proxyURL, proxyErr := s.grokTestProxyURL(ctx, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
+	}
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API request failed: %s", err.Error()))
 	}
@@ -1343,7 +1344,11 @@ func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context
 			s.applyGrokTestRequestHeaders(req, account, authToken, "application/json")
 			req.ContentLength = int64(len(payloadBytes))
 		}
-		resp, doErr = s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
+		proxyURL, proxyErr := s.grokTestProxyURL(ctx, account)
+		if proxyErr != nil {
+			return s.sendErrorAndEnd(c, proxyErr.Error())
+		}
+		resp, doErr = s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 		if doErr == nil {
 			break
 		}
@@ -1434,7 +1439,11 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 	}
 	s.applyGrokTestRequestHeaders(req, account, authToken, "application/json")
 
-	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
+	proxyURL, proxyErr := s.grokTestProxyURL(ctx, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
+	}
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video request failed: %s", err.Error()))
 	}
@@ -1475,7 +1484,11 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 			return s.sendErrorAndEnd(c, "Failed to create Grok video status request")
 		}
 		s.applyGrokTestRequestHeaders(statusReq, account, authToken, "application/json")
-		statusResp, err := s.httpUpstream.Do(statusReq, s.grokTestProxyURL(account), account.ID, account.Concurrency)
+		proxyURL, proxyErr := s.grokTestProxyURL(ctx, account)
+		if proxyErr != nil {
+			return s.sendErrorAndEnd(c, proxyErr.Error())
+		}
+		statusResp, err := s.httpUpstream.Do(statusReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video status failed: %s", err.Error()))
 		}
@@ -1532,7 +1545,11 @@ func (s *AccountTestService) emitGrokVideoResult(c *gin.Context, ctx context.Con
 		return s.sendErrorAndEnd(c, "Failed to create Grok video content request")
 	}
 	s.applyGrokTestRequestHeaders(req, account, authToken, "video/*, application/octet-stream, */*")
-	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
+	proxyURL, proxyErr := s.grokTestProxyURL(ctx, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
+	}
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video content download failed: %s", err.Error()))
 	}
@@ -1604,7 +1621,11 @@ User query:
 	}
 	s.applyGrokTestRequestHeaders(req, account, authToken, "application/json")
 
-	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
+	proxyURL, proxyErr := s.grokTestProxyURL(ctx, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
+	}
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("standalone web_search probe failed: %s", err.Error()))
 	}
@@ -1685,7 +1706,11 @@ func (s *AccountTestService) testGrokTTS(c *gin.Context, ctx context.Context, ac
 			return s.sendErrorAndEnd(c, "Failed to create Grok TTS request")
 		}
 		s.applyGrokTestRequestHeaders(req, account, authToken, "audio/*, application/json, */*")
-		resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
+		proxyURL, proxyErr := s.grokTestProxyURL(ctx, account)
+		if proxyErr != nil {
+			return s.sendErrorAndEnd(c, proxyErr.Error())
+		}
+		resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok TTS failed: %s", err.Error()))
 		}
@@ -1776,7 +1801,11 @@ func (s *AccountTestService) testGrokSTT(c *gin.Context, ctx context.Context, ac
 	}
 	account.ApplyHeaderOverrides(req.Header)
 
-	resp, err := s.httpUpstream.Do(req, s.grokTestProxyURL(account), account.ID, account.Concurrency)
+	proxyURL, proxyErr := s.grokTestProxyURL(ctx, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
+	}
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok STT failed: %s", err.Error()))
 	}
@@ -1857,7 +1886,11 @@ func (s *AccountTestService) testGrokRealtime(c *gin.Context, ctx context.Contex
 	dialCtx, cancel := context.WithTimeout(ctx, grokRealtimeProbeTimeout)
 	defer cancel()
 
-	conn, status, _, dialErr := dialer.Dial(dialCtx, wsURL, headers, s.grokTestProxyURL(account))
+	proxyURL, proxyErr := s.grokTestProxyURL(dialCtx, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
+	}
+	conn, status, _, dialErr := dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 	if dialErr != nil {
 		detail := dialErr.Error()
 		var hs *openAIWSHandshakeError
@@ -2141,9 +2174,9 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	account.ApplyHeaderOverrides(req.Header)
 	applyOpenCodeSessionHeader(c, account, apiURL, req.Header, payloadBytes)
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
@@ -2274,9 +2307,9 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 
 	resp, err := s.doOpenAIAccountTestUpstream(req, proxyURL, account, true)
@@ -2422,9 +2455,9 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
 	// Get proxy and execute request
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
@@ -3050,9 +3083,9 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
@@ -3186,9 +3219,9 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	// 与该账号真实出站的身份不是同一个（issue #3901 的配对不变式由收口保证）。
 	enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, proxyErr := resolveAccountProxyURL(ctx, nil, account)
+	if proxyErr != nil {
+		return s.sendErrorAndEnd(c, proxyErr.Error())
 	}
 	resp, err := s.doOpenAIAccountTestUpstream(req, proxyURL, account, false)
 	if err != nil {
