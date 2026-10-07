@@ -20,6 +20,7 @@ RUN apk add --no-cache tzdata && \
 
 COPY deploy/vpngate/refresher/refresh.py /app/refresh.py
 COPY deploy/vpngate/refresher/third_party/ /app/third_party/
+RUN chmod -R a+rX /app
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 USER vpngate
