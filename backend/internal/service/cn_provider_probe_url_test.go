@@ -6,7 +6,9 @@ package service
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -86,7 +88,7 @@ func TestCNProviderQuotaService_RejectsURLBlockedByPolicy(t *testing.T) {
 		Credentials: map[string]any{
 			"account_mode": "coding",
 			"api_key":      "sk-test",
-			"base_url":     "https://relay.attacker.example/api.kimi.com/coding",
+			"base_url":     "https://api.kimi.ai/coding/v1",
 		},
 	}}
 	upstream := &recordingHTTPUpstream{}
@@ -96,6 +98,79 @@ func TestCNProviderQuotaService_RejectsURLBlockedByPolicy(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "CN_QUOTA_URL_REJECTED")
 	require.Zero(t, upstream.calls, "probe must not issue any upstream request when URL policy rejects the target")
+}
+
+func TestCNProviderQuotaService_RejectsSpoofedKimiURL(t *testing.T) {
+	repo := &fakeCNProbeAccountRepo{account: &Account{
+		ID: 1, Platform: PlatformKimi, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"account_mode": AccountModeCoding,
+			"api_key":      "test-only-placeholder",
+			"base_url":     "https://relay.attacker.example/api.kimi.com/coding",
+		},
+	}}
+	upstream := &recordingHTTPUpstream{}
+	svc := NewCNProviderQuotaService(repo, nil, upstream, nil)
+	_, err := svc.QueryUsage(context.Background(), 1)
+	require.ErrorContains(t, err, "CN_QUOTA_NOT_CODING_PLAN")
+	require.Zero(t, upstream.calls)
+}
+
+type kimiQuotaTestRepo struct {
+	fakeCNProbeAccountRepo
+	updates map[string]any
+}
+
+func (r *kimiQuotaTestRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	r.updates = updates
+	return nil
+}
+
+type kimiQuotaTestUpstream struct {
+	recordingHTTPUpstream
+	request *http.Request
+}
+
+func (u *kimiQuotaTestUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	u.calls++
+	u.request = req
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"limits":[{"detail":{"limit":100,"remaining":75}}],"usage":{"limit":1000,"remaining":800}}`)),
+	}, nil
+}
+
+func TestCNProviderQuotaService_KimiOfficialHosts(t *testing.T) {
+	for _, host := range []string{"api.kimi.com", "api.kimi.ai"} {
+		for _, path := range []string{"/coding", "/coding/", "/coding/v1", "/coding/v1/"} {
+			t.Run(host+path, func(t *testing.T) {
+				repo := &kimiQuotaTestRepo{fakeCNProbeAccountRepo: fakeCNProbeAccountRepo{account: &Account{
+					ID: 1, Platform: PlatformKimi, Type: AccountTypeAPIKey,
+					Credentials: map[string]any{
+						"account_mode": AccountModeCoding,
+						"api_key":      "test-only-placeholder",
+						"base_url":     "https://" + host + path,
+					},
+				}}}
+				upstream := &kimiQuotaTestUpstream{}
+				svc := NewCNProviderQuotaService(repo, nil, upstream, cnProbeAllowlistConfig(host))
+				result, err := svc.QueryUsage(context.Background(), 1)
+				require.NoError(t, err)
+				require.True(t, result.Success)
+				require.True(t, result.CredentialValid)
+				require.True(t, result.Persisted)
+				require.Equal(t, PlatformKimi, result.Provider)
+				require.Len(t, result.Tiers, 2)
+				require.Equal(t, float64(25), result.Tiers[0].UsedPercent)
+				require.Equal(t, float64(20), result.Tiers[1].UsedPercent)
+				require.Equal(t, float64(25), repo.updates["kimi_5h_used_percent"])
+				require.Equal(t, 1, upstream.calls)
+				require.Equal(t, http.MethodGet, upstream.request.Method)
+				require.Equal(t, "https://"+host+"/coding/v1/usages", upstream.request.URL.String())
+				require.Equal(t, "Bearer test-only-placeholder", upstream.request.Header.Get("Authorization"))
+			})
+		}
+	}
 }
 
 // deepseek payg 账号自定义 base_url → 余额端点落在中转主机上，必须先过策略。

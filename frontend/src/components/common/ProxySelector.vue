@@ -352,6 +352,13 @@ const toggle = () => {
   }
 }
 
+watch(() => props.disabled, (disabled) => {
+  if (disabled) {
+    isOpen.value = false
+    searchQuery.value = ''
+  }
+})
+
 const selectOption = (value: number | null) => {
   emit('update:modelValue', value)
   isOpen.value = false

@@ -235,14 +235,14 @@ func TestOpenAIStickySessionYieldsOnlyForBlockedModel(t *testing.T) {
 
 	svc, cache, sticky, other := newStreamBreakerStickyService(groupID)
 	for i := 0; i < 2; i++ {
-		svc.handleOpenAIAccountUpstreamError(context.Background(), &sticky, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"bad gateway"}}`), "gpt-5.5")
+		svc.handleOpenAIAccountUpstreamError(context.Background(), &sticky, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"bad gateway"}}`), "gpt-5.4")
 	}
-	require.Equal(t, other.ID, selectStreamBreakerAccount(t, svc, groupID, "gpt-5.5"))
+	require.Equal(t, other.ID, selectStreamBreakerAccount(t, svc, groupID, "gpt-5.4"))
 	require.Equal(t, other.ID, cache.sessionBindings["openai:session_hash_breaker"])
 
 	svc, _, sticky, _ = newStreamBreakerStickyService(groupID)
 	for i := 0; i < 2; i++ {
-		svc.handleOpenAIAccountUpstreamError(context.Background(), &sticky, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"bad gateway"}}`), "gpt-5.5")
+		svc.handleOpenAIAccountUpstreamError(context.Background(), &sticky, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"bad gateway"}}`), "gpt-5.4")
 	}
 	require.Equal(t, sticky.ID, selectStreamBreakerAccount(t, svc, groupID, "gpt-6-luna"))
 }
