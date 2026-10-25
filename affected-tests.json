@@ -1,0 +1,1 @@
+{"go": {"tags": "unit"}, "ignore": ["frontend/*", "deploy/*", "affected-tests.json"]}
