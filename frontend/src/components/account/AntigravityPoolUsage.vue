@@ -137,7 +137,9 @@ const blocks = computed(() =>
     const isGemini = pool.pool === 'gemini'
     const poolLabel = isGemini
       ? t('admin.accounts.antigravityPool.gemini')
-      : t('admin.accounts.antigravityPool.claudeGpt')
+      : pool.pool === 'gemini_argon'
+        ? t('admin.accounts.antigravityPool.argon')
+        : t('admin.accounts.antigravityPool.claudeGpt')
 
     // 周在前、5h 在后，与 Antigravity 客户端设置页的行序一致。
     // 上游没下发的窗口（null/undefined）整行不渲染——不要补一行 0%。

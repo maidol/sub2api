@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
 import type { Account } from '@/types'
@@ -128,6 +129,26 @@ describe('AccountUsageCell', () => {
         dispatchEvent: vi.fn(),
       }))
     })
+  })
+
+  it('keeps cached Claude quota visible while a replacement batch is loading', async () => {
+    const requestBatchedUsage = vi.fn()
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 98101, platform: 'anthropic', type: 'oauth' }), requestBatchedUsage,
+        batchedUsage: { five_hour: { utilization: 21 } }, batchedUsageLoading: false },
+      global: { stubs: { UsageProgressBar: { props: ['utilization'], template: '<div data-test="quota">{{ utilization }}</div>' }, AccountQuotaInfo: true } }
+    })
+    await flushPromises()
+    const quota = wrapper.get('[data-test="quota"]').element
+    await wrapper.setProps({ batchedUsageLoading: true })
+    expect(wrapper.get('[data-test="quota"]').text()).toBe('21')
+    expect(wrapper.get('[data-test="quota"]').element).toBe(quota)
+    expect(wrapper.find('.animate-pulse').exists()).toBe(false)
+    expect(wrapper.attributes('aria-busy')).toBe('true')
+    await wrapper.setProps({ batchedUsage: { five_hour: { utilization: 44 } }, batchedUsageLoading: false })
+    expect(wrapper.get('[data-test="quota"]').text()).toBe('44')
+    expect(wrapper.get('[data-test="quota"]').element).toBe(quota)
+    wrapper.unmount()
   })
 
   it('renders eligible Ollama Cloud state and forwards query updates', async () => {
@@ -495,6 +516,107 @@ describe('AccountUsageCell', () => {
     expect(scrollContainer.findAll('.usage-bar').length).toBe(3)
   })
 
+  it('Antigravity shows the 5-hour and weekly window of each quota group when the summary is present', async () => {
+    getUsage.mockResolvedValue({
+      antigravity_quota: {
+        'gemini-3-flash': { utilization: 99, reset_time: '2026-11-11T15:52:48Z' }
+      },
+      antigravity_quota_groups: [
+        {
+          key: 'gemini',
+          name: 'Gemini Models',
+          windows: [
+            { window: '5h', utilization: 60, resets_at: '2026-11-04T20:52:48Z' },
+            { window: 'weekly', utilization: 25, resets_at: '2026-11-11T15:52:48Z' }
+          ]
+        },
+        {
+          key: '3p',
+          name: 'Claude and GPT models',
+          windows: [
+            { window: '5h', utilization: 0, resets_at: null },
+            { window: 'weekly', utilization: 10, resets_at: '2026-11-11T15:52:48Z' }
+          ]
+        },
+        {
+          key: 'gemini-argon-wtu',
+          name: 'Gemini 4 Argon',
+          windows: [{ window: 'weekly', utilization: 20, resets_at: '2026-11-11T17:11:15Z' }]
+        }
+      ]
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 1003, platform: 'antigravity', type: 'oauth', extra: {} })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const bars = wrapper.findAll('.usage-bar').map((bar) => bar.text())
+    expect(bars).toEqual([
+      'admin.accounts.usageWindow.antigravityGemini5h|60|2026-11-04T20:52:48Z',
+      'admin.accounts.usageWindow.antigravityGeminiWeekly|25|2026-11-11T15:52:48Z',
+      'admin.accounts.usageWindow.antigravityOther5h|0|',
+      'admin.accounts.usageWindow.antigravityOtherWeekly|10|2026-11-11T15:52:48Z',
+      // Pro plans' separate Argon quota is its own row, not a second Claude/GPT week.
+      'admin.accounts.usageWindow.antigravityArgonWeekly|20|2026-11-11T17:11:15Z'
+    ])
+    // The per-model figure (one tighter window per model) is not shown next to the real windows.
+    expect(wrapper.text()).not.toContain('gemini3Flash')
+  })
+
+  it('Antigravity query button refreshes past the server cache', async () => {
+    const first = {
+      antigravity_quota_groups: [
+        { key: '3p', name: 'Claude and GPT models', windows: [{ window: 'weekly', utilization: 100, resets_at: '2026-11-12T03:39:37Z' }] }
+      ]
+    }
+    const upgraded = {
+      antigravity_quota_groups: [
+        { key: '3p', name: 'Claude and GPT models', windows: [{ window: 'weekly', utilization: 0, resets_at: '2026-11-14T21:22:49Z' }] }
+      ]
+    }
+    getUsage.mockResolvedValueOnce(first).mockResolvedValueOnce(upgraded)
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 1006, platform: 'antigravity', type: 'oauth', extra: {} })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+    await flushPromises()
+    expect(wrapper.find('.usage-bar').text()).toContain('|100|')
+
+    const button = wrapper.find('[data-testid="antigravity-active-query"]')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toContain('admin.accounts.usageWindow.activeQuery')
+    await button.trigger('click')
+    await flushPromises()
+
+    // An active query that bypasses the cache (an upgrade or reset shows at once).
+    expect(getUsage).toHaveBeenLastCalledWith(1006, 'active', true)
+    expect(wrapper.find('.usage-bar').text()).toContain('|0|2026-11-14T21:22:49Z')
+  })
+
   it('Antigravity 会显示 AI Credits 余额信息', async () => {
     getUsage.mockResolvedValue({
       ai_credits: [
@@ -578,6 +700,45 @@ describe('AccountUsageCell', () => {
     expect(poolContainer.attributes('title')).toBe('Authoritative: retrieveUserQuotaSummary')
     expect(poolContainer.find('.pool-usage').text()).toBe('gemini,claude_gpt')
     expect(wrapper.findComponent({ name: 'AntigravityPoolUsage' }).props('pools')).toEqual(pools)
+  })
+
+  it('Antigravity mixed inferred families keep every model visible', async () => {
+    const reset = '2099-11-15T18:00:00Z'
+    const fixturePath = process.env.SUB2API_POOL_FALLBACK_FIXTURE
+    const usage = fixturePath ? JSON.parse(readFileSync(fixturePath, 'utf8')) : {
+      subscription_tier: 'PRO',
+      antigravity_pools: [],
+      antigravity_quota: {
+        'gemini-3.8-flash': { utilization: 25, reset_time: reset },
+        'gemini-3.8-pro': { utilization: 75, reset_time: reset },
+        'gemini-4-argon': { utilization: 50, reset_time: reset },
+        'gemini-4-argon-high': { utilization: 50, reset_time: reset },
+        'claude-review': { utilization: 25, reset_time: reset },
+        'gpt-review': { utilization: 25, reset_time: reset }
+      }
+    }
+    getUsage.mockResolvedValue(usage)
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 98801, platform: 'antigravity', type: 'oauth', extra: {} }) },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization'],
+            template: '<div data-test="fallback-model-row">{{ label }}|{{ utilization }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledWith(98801)
+    const rows = wrapper.findAll('[data-test="fallback-model-row"]').map(row => row.text()).sort()
+    expect(rows).toEqual([
+      'claude-review|25', 'gemini-3.8-flash|25', 'gemini-3.8-pro|75',
+      'gemini-4-argon-high|50', 'gemini-4-argon|50', 'gpt-review|25'
+    ].sort())
+    expect(wrapper.find('[data-test="antigravity-pools"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('Antigravity 家族池渲染（反向②）：未下发 antigravity_pools 时回落到逐模型清单', async () => {

@@ -22,7 +22,7 @@ func geminiQuota() map[string]*AntigravityModelQuota {
 
 // 正向：同池齐平 → 合并成一行
 func TestBuildAntigravityPools_MergesUniformFamily(t *testing.T) {
-	pools := buildAntigravityPools(geminiQuota())
+	pools := buildAntigravityPools(geminiQuota(), "")
 
 	require.Len(t, pools, 1)
 	require.Equal(t, antigravityPoolGemini, pools[0].Pool)
@@ -38,7 +38,7 @@ func TestBuildAntigravityPools_RefusesMixedUtilization(t *testing.T) {
 	quota := geminiQuota()
 	quota["gemini-2.5-pro"].Utilization = 7
 
-	require.Empty(t, buildAntigravityPools(quota))
+	require.Empty(t, buildAntigravityPools(quota, ""))
 }
 
 // 反向②：resetTime 不一致 → 同样不合并
@@ -46,7 +46,7 @@ func TestBuildAntigravityPools_RefusesMixedResetTime(t *testing.T) {
 	quota := geminiQuota()
 	quota["gemini-2.5-pro"].ResetTime = poolResetB
 
-	require.Empty(t, buildAntigravityPools(quota))
+	require.Empty(t, buildAntigravityPools(quota, ""))
 }
 
 // 未知家族不进池，也不影响其它池
@@ -54,7 +54,7 @@ func TestBuildAntigravityPools_IgnoresUnknownFamily(t *testing.T) {
 	quota := geminiQuota()
 	quota["foo-bar-9"] = &AntigravityModelQuota{Utilization: 88, ResetTime: poolResetB}
 
-	pools := buildAntigravityPools(quota)
+	pools := buildAntigravityPools(quota, "")
 	require.Len(t, pools, 1)
 	require.NotContains(t, pools[0].Models, "foo-bar-9")
 }
@@ -66,7 +66,7 @@ func TestBuildAntigravityPools_StableOrder(t *testing.T) {
 	quota["gpt-5.6"] = &AntigravityModelQuota{Utilization: 0, ResetTime: poolResetB}
 
 	for i := 0; i < 20; i++ { // map 顺序随机，跑多次才能暴露顺序依赖
-		pools := buildAntigravityPools(quota)
+		pools := buildAntigravityPools(quota, "")
 		require.Len(t, pools, 2)
 		require.Equal(t, antigravityPoolGemini, pools[0].Pool)
 		require.Equal(t, antigravityPoolClaudeGPT, pools[1].Pool)
@@ -74,8 +74,8 @@ func TestBuildAntigravityPools_StableOrder(t *testing.T) {
 }
 
 func TestBuildAntigravityPools_EmptyInput(t *testing.T) {
-	require.Nil(t, buildAntigravityPools(nil))
-	require.Nil(t, buildAntigravityPools(map[string]*AntigravityModelQuota{}))
+	require.Nil(t, buildAntigravityPools(nil, ""))
+	require.Nil(t, buildAntigravityPools(map[string]*AntigravityModelQuota{}, ""))
 }
 
 func TestRecalcAntigravityRemainingSeconds(t *testing.T) {

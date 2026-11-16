@@ -190,7 +190,8 @@ type RetrieveUserQuotaSummaryRequest struct {
 
 // RetrieveUserQuotaSummaryResponse retrieveUserQuotaSummary 响应
 type RetrieveUserQuotaSummaryResponse struct {
-	Groups []QuotaSummaryGroup `json:"groups,omitempty"`
+	Groups      []QuotaSummaryGroup `json:"groups,omitempty"`
+	Description string              `json:"description,omitempty"`
 }
 
 // UnmarshalJSON 兼容 paidTier 既可能是字符串也可能是对象的情况。
@@ -829,75 +830,6 @@ func (c *Client) fetchAvailableModels(ctx context.Context, availableURLs []strin
 		// 标记成功的 URL，下次优先使用
 		DefaultURLAvailability.MarkSuccess(baseURL)
 		return &modelsResp, rawResp, nil
-	}
-
-	return nil, nil, lastErr
-}
-
-// RetrieveUserQuotaSummary 获取按模型组分的配额摘要（每组含 5h 与 weekly 两个窗口），
-// 返回解析后的结构体和原始 JSON。这是 Antigravity 客户端设置页读的那一份数据；
-// fetchAvailableModels 只有 per-model 的 5h，没有周窗口。
-//
-// 支持 URL fallback：prod → daily，与 LoadCodeAssist 一致。
-func (c *Client) RetrieveUserQuotaSummary(ctx context.Context, accessToken, projectID string) (*RetrieveUserQuotaSummaryResponse, map[string]any, error) {
-	if c == nil || c.httpClient == nil {
-		return nil, nil, errors.New("antigravity client is not configured")
-	}
-
-	reqBody := RetrieveUserQuotaSummaryRequest{Project: projectID}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, nil, fmt.Errorf("序列化请求失败: %w", err)
-	}
-
-	availableURLs := BaseURLs
-	var lastErr error
-	for urlIdx, baseURL := range availableURLs {
-		apiURL := baseURL + "/v1internal:retrieveUserQuotaSummary"
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader(string(bodyBytes)))
-		if err != nil {
-			lastErr = fmt.Errorf("创建请求失败: %w", err)
-			continue
-		}
-		req.Header.Set("Authorization", "Bearer "+accessToken)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", GetUserAgentForContext(ctx))
-
-		resp, err := servertiming.Do(c.httpClient, req)
-		if err != nil {
-			lastErr = fmt.Errorf("retrieveUserQuotaSummary 请求失败: %w", err)
-			if shouldFallbackToNextURL(err, 0) && urlIdx < len(availableURLs)-1 {
-				log.Printf("[antigravity] retrieveUserQuotaSummary URL fallback: %s -> %s", baseURL, availableURLs[urlIdx+1])
-				continue
-			}
-			return nil, nil, lastErr
-		}
-
-		respBodyBytes, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if err != nil {
-			return nil, nil, fmt.Errorf("读取响应失败: %w", err)
-		}
-
-		if shouldFallbackToNextURL(nil, resp.StatusCode) && urlIdx < len(availableURLs)-1 {
-			log.Printf("[antigravity] retrieveUserQuotaSummary URL fallback (HTTP %d): %s -> %s", resp.StatusCode, baseURL, availableURLs[urlIdx+1])
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, nil, fmt.Errorf("retrieveUserQuotaSummary 失败 (HTTP %d): %s", resp.StatusCode, string(respBodyBytes))
-		}
-
-		var summary RetrieveUserQuotaSummaryResponse
-		if err := json.Unmarshal(respBodyBytes, &summary); err != nil {
-			return nil, nil, fmt.Errorf("响应解析失败: %w", err)
-		}
-
-		var rawResp map[string]any
-		_ = json.Unmarshal(respBodyBytes, &rawResp)
-
-		DefaultURLAvailability.MarkSuccess(baseURL)
-		return &summary, rawResp, nil
 	}
 
 	return nil, nil, lastErr

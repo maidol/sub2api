@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 const (
 	antigravityPoolGemini    = "gemini"
+	antigravityPoolArgon     = "gemini_argon"
 	antigravityPoolClaudeGPT = "claude_gpt"
 
 	antigravityWindowFiveHour = "5h"
@@ -23,7 +25,7 @@ const (
 )
 
 // AntigravityPoolUsage 是一个家族共享池的窗口快照，对齐 Antigravity 客户端设置页的
-// 「Gemini Models」/「Claude and GPT models」两组。
+// Gemini、Pro 的独立 Argon，以及 Claude/GPT 配额组。
 //
 // Weekly 为 nil 表示上游本次没有下发周窗口——前端整行不渲染，不要填 0：
 // 「本周用了 0」和「上游没给这个数」在页面上必须长得不一样。
@@ -39,6 +41,8 @@ type AntigravityPoolUsage struct {
 func antigravityPoolFor(modelKey string) string {
 	k := strings.ToLower(modelKey)
 	switch {
+	case strings.HasPrefix(k, "gemini-4-argon"):
+		return antigravityPoolArgon
 	case strings.HasPrefix(k, "gemini"):
 		return antigravityPoolGemini
 	case strings.HasPrefix(k, "claude"), strings.HasPrefix(k, "gpt"):
@@ -53,6 +57,8 @@ func antigravityPoolModelPrefixes(pool string) []string {
 	switch pool {
 	case antigravityPoolGemini:
 		return []string{"gemini"}
+	case antigravityPoolArgon:
+		return []string{"gemini-4-argon"}
 	case antigravityPoolClaudeGPT:
 		return []string{"claude", "gpt"}
 	}
@@ -60,12 +66,13 @@ func antigravityPoolModelPrefixes(pool string) []string {
 }
 
 // buildAntigravityPools 只在同池内每个模型的 (utilization, resetTime) 完全一致时
-// 才把它们合并成一行；有一个不一致，整池就不出现在返回里，前端回落到逐模型清单。
+// 才把它们合并成一行；任一家族不一致就不返回任何反推池，前端整体回落到逐模型清单。
+// 不能返回部分家族池，否则前端的池分支会遮蔽未成池模型。
 //
 // 这条一致性检查是「per-model 配额 == 家族池」这个假设的证伪点，不是防御性代码。
 // 不要放宽成「取最大值」或「取第一个」——那样假设一旦被推翻，页面上不会有任何现象，
 // 照样画出一条看起来很正常但是错的池。
-func buildAntigravityPools(quota map[string]*AntigravityModelQuota) []AntigravityPoolUsage {
+func buildAntigravityPools(quota map[string]*AntigravityModelQuota, tier string) []AntigravityPoolUsage {
 	if len(quota) == 0 {
 		return nil
 	}
@@ -83,6 +90,10 @@ func buildAntigravityPools(quota map[string]*AntigravityModelQuota) []Antigravit
 			continue
 		}
 		pool := antigravityPoolFor(key)
+		// 只有 Pro 已知有独立 Argon 池；未知套餐保持共享池的保守反推。
+		if pool == antigravityPoolArgon && !strings.EqualFold(tier, "PRO") {
+			pool = antigravityPoolGemini
+		}
 		if pool == "" {
 			continue
 		}
@@ -100,10 +111,13 @@ func buildAntigravityPools(quota map[string]*AntigravityModelQuota) []Antigravit
 	// 顺序由这个固定数组给，不要靠 map 遍历——Go 的 map 顺序是随机的，
 	// 靠它排序会让同一份数据每次刷新都换行序，而且测试会随机红。
 	out := make([]AntigravityPoolUsage, 0, 2)
-	for _, pool := range []string{antigravityPoolGemini, antigravityPoolClaudeGPT} {
+	for _, pool := range []string{antigravityPoolGemini, antigravityPoolArgon, antigravityPoolClaudeGPT} {
 		a := byPool[pool]
-		if a == nil || a.mixed {
+		if a == nil {
 			continue
+		}
+		if a.mixed {
+			return nil
 		}
 		sort.Strings(a.models)
 		out = append(out, AntigravityPoolUsage{
@@ -131,7 +145,7 @@ func antigravityProgress(utilization float64, resetTime string) *UsageProgress {
 	return p
 }
 
-// buildAntigravityPoolsFromSummary 把 retrieveUserQuotaSummary 的 groups 直接转成两池两窗口。
+// buildAntigravityPoolsFromSummary 把 retrieveUserQuotaSummary 的 groups 直接转成家族池窗口。
 //
 // 这是权威来源：分组和分窗口都是上游自己给的，不需要像 buildAntigravityPools 那样
 // 从 per-model 数据反推。返回 nil 表示这份响应里一个能用的桶都没有——
@@ -184,7 +198,7 @@ func buildAntigravityPoolsFromSummary(summary *antigravity.RetrieveUserQuotaSumm
 
 	// 顺序仍由固定数组给，理由同 buildAntigravityPools。
 	out := make([]AntigravityPoolUsage, 0, 2)
-	for _, pool := range []string{antigravityPoolGemini, antigravityPoolClaudeGPT} {
+	for _, pool := range []string{antigravityPoolGemini, antigravityPoolArgon, antigravityPoolClaudeGPT} {
 		entry := byPool[pool]
 		if entry == nil || (entry.FiveHour == nil && entry.Weekly == nil) {
 			continue
@@ -202,6 +216,8 @@ func buildAntigravityPoolsFromSummary(summary *antigravity.RetrieveUserQuotaSumm
 func antigravitySummaryPool(groupDisplayName, bucketID string) string {
 	id := strings.ToLower(strings.TrimSpace(bucketID))
 	switch {
+	case strings.HasPrefix(id, "gemini-argon"):
+		return antigravityPoolArgon
 	case strings.HasPrefix(id, "gemini"):
 		return antigravityPoolGemini
 	case strings.HasPrefix(id, "3p"), strings.HasPrefix(id, "claude"), strings.HasPrefix(id, "gpt"):
@@ -210,6 +226,8 @@ func antigravitySummaryPool(groupDisplayName, bucketID string) string {
 
 	name := strings.ToLower(strings.TrimSpace(groupDisplayName))
 	switch {
+	case strings.Contains(name, "gemini") && strings.Contains(name, "argon"):
+		return antigravityPoolArgon
 	case strings.Contains(name, "gemini"):
 		return antigravityPoolGemini
 	case strings.Contains(name, "claude"), strings.Contains(name, "gpt"):
@@ -279,11 +297,14 @@ func (s *AccountUsageService) withAntigravityPoolWindowStats(ctx context.Context
 	}
 
 	now := time.Now()
+	splitArgon := slices.ContainsFunc(usage.AntigravityPools, func(pool AntigravityPoolUsage) bool {
+		return pool.Pool == antigravityPoolArgon
+	})
 	out := *usage
 	out.AntigravityPools = make([]AntigravityPoolUsage, len(usage.AntigravityPools))
 	for i, pool := range usage.AntigravityPools {
-		pool.FiveHour = s.antigravityPoolWindowWithStats(ctx, reader, account.ID, pool.Pool, antigravityWindowFiveHour, 5*time.Hour, pool.FiveHour, now)
-		pool.Weekly = s.antigravityPoolWindowWithStats(ctx, reader, account.ID, pool.Pool, antigravityWindowWeekly, 7*24*time.Hour, pool.Weekly, now)
+		pool.FiveHour = s.antigravityPoolWindowWithStats(ctx, reader, account.ID, pool.Pool, antigravityWindowFiveHour, 5*time.Hour, pool.FiveHour, now, splitArgon)
+		pool.Weekly = s.antigravityPoolWindowWithStats(ctx, reader, account.ID, pool.Pool, antigravityWindowWeekly, 7*24*time.Hour, pool.Weekly, now, splitArgon)
 		out.AntigravityPools[i] = pool
 	}
 	return &out
@@ -297,6 +318,7 @@ func (s *AccountUsageService) antigravityPoolWindowWithStats(
 	length time.Duration,
 	progress *UsageProgress,
 	now time.Time,
+	splitArgon bool,
 ) *UsageProgress {
 	if progress == nil {
 		return nil
@@ -307,8 +329,8 @@ func (s *AccountUsageService) antigravityPoolWindowWithStats(
 	}
 
 	start := antigravityWindowStart(progress.ResetsAt, progress.WindowIdle, length, now)
-	// 键里带窗口起点：窗口一滚动就自然换键，旧统计不会被带进新窗口。
-	key := fmt.Sprintf("%d:%s:%s:%d", accountID, pool, window, start.Unix())
+	// 分池状态也入键，套餐或上游分组变化时不复用旧的共享统计。
+	key := fmt.Sprintf("%d:%s:%s:%d:%t", accountID, pool, window, start.Unix(), splitArgon)
 
 	var stats *WindowStats
 	if cached, ok := s.cache.agPoolStatsCache.Load(key); ok {
@@ -317,7 +339,11 @@ func (s *AccountUsageService) antigravityPoolWindowWithStats(
 		}
 	}
 	if stats == nil {
-		raw, err := reader.GetAccountModelFamilyWindowStats(ctx, accountID, start, now, prefixes)
+		var excluded []string
+		if pool == antigravityPoolGemini && splitArgon {
+			excluded = antigravityPoolModelPrefixes(antigravityPoolArgon)
+		}
+		raw, err := reader.GetAccountModelFamilyWindowStats(ctx, accountID, start, now, prefixes, excluded...)
 		if err != nil {
 			slog.Warn("failed to get antigravity pool window stats",
 				"account_id", accountID, "pool", pool, "window", window, "error", err)

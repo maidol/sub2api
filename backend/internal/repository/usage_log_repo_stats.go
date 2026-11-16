@@ -336,8 +336,9 @@ func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountI
 
 // GetAccountModelFamilyWindowStats 获取账号在 [startTime, endTime) 内、实际上游模型
 // 以 modelPrefixes 中任一前缀开头（不区分大小写）的请求统计。
+// excludedModelPrefixes 从匹配结果排除独立子池；省略时仍统计整个家族。
 // 上游模型取 upstream_model，未做映射（NULL/空）时回落到 model。
-func (r *usageLogRepository) GetAccountModelFamilyWindowStats(ctx context.Context, accountID int64, startTime, endTime time.Time, modelPrefixes []string) (*usagestats.AccountStats, error) {
+func (r *usageLogRepository) GetAccountModelFamilyWindowStats(ctx context.Context, accountID int64, startTime, endTime time.Time, modelPrefixes []string, excludedModelPrefixes ...string) (*usagestats.AccountStats, error) {
 	stats := &usagestats.AccountStats{}
 	if len(modelPrefixes) == 0 {
 		return stats, nil
@@ -358,11 +359,20 @@ func (r *usageLogRepository) GetAccountModelFamilyWindowStats(ctx context.Contex
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
 			AND LOWER(COALESCE(NULLIF(upstream_model, ''), model)) LIKE ANY($4)
 	`
+	args := []any{accountID, startTime, endTime, pq.Array(patterns)}
+	if len(excludedModelPrefixes) > 0 {
+		excluded := make([]string, 0, len(excludedModelPrefixes))
+		for _, prefix := range excludedModelPrefixes {
+			excluded = append(excluded, strings.ToLower(prefix)+"%")
+		}
+		query += " AND NOT (LOWER(COALESCE(NULLIF(upstream_model, ''), model)) LIKE ANY($5))"
+		args = append(args, pq.Array(excluded))
+	}
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{accountID, startTime, endTime, pq.Array(patterns)},
+		args,
 		&stats.Requests,
 		&stats.Tokens,
 		&stats.Cost,

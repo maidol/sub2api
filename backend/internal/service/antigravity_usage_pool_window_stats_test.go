@@ -12,6 +12,7 @@ import (
 type agPoolStatsCall struct {
 	start, end time.Time
 	prefixes   []string
+	excluded   []string
 }
 
 type agPoolStatsRepoStub struct {
@@ -19,8 +20,8 @@ type agPoolStatsRepoStub struct {
 	calls []agPoolStatsCall
 }
 
-func (r *agPoolStatsRepoStub) GetAccountModelFamilyWindowStats(_ context.Context, _ int64, start, end time.Time, prefixes []string) (*usagestats.AccountStats, error) {
-	r.calls = append(r.calls, agPoolStatsCall{start: start, end: end, prefixes: prefixes})
+func (r *agPoolStatsRepoStub) GetAccountModelFamilyWindowStats(_ context.Context, _ int64, start, end time.Time, prefixes []string, excluded ...string) (*usagestats.AccountStats, error) {
+	r.calls = append(r.calls, agPoolStatsCall{start: start, end: end, prefixes: prefixes, excluded: excluded})
 	return &usagestats.AccountStats{Requests: int64(len(r.calls)), Tokens: 1000}, nil
 }
 
@@ -94,6 +95,30 @@ func TestWithAntigravityPoolWindowStatsWithoutReader(t *testing.T) {
 	svc := &AccountUsageService{usageLogRepo: &usageBatchLogRepoStub{}, cache: NewUsageCache()}
 	usage := &UsageInfo{AntigravityPools: []AntigravityPoolUsage{{Pool: antigravityPoolGemini, FiveHour: &UsageProgress{}}}}
 	require.Same(t, usage, svc.withAntigravityPoolWindowStats(context.Background(), &Account{ID: 1}, usage))
+}
+
+func TestWithAntigravityPoolWindowStatsArgonSplitAndCache(t *testing.T) {
+	repo := &agPoolStatsRepoStub{}
+	svc := &AccountUsageService{usageLogRepo: repo, cache: NewUsageCache()}
+	reset := time.Now().Add(time.Hour)
+	shared := &UsageInfo{AntigravityPools: []AntigravityPoolUsage{{Pool: "gemini", FiveHour: &UsageProgress{ResetsAt: &reset}}}}
+	svc.withAntigravityPoolWindowStats(t.Context(), &Account{ID: 7}, shared)
+	require.Len(t, repo.calls, 1)
+	require.Empty(t, repo.calls[0].excluded, "shared pool includes Argon")
+	split := &UsageInfo{AntigravityPools: []AntigravityPoolUsage{
+		{Pool: "gemini", FiveHour: &UsageProgress{ResetsAt: &reset}},
+		{Pool: "gemini_argon", FiveHour: &UsageProgress{ResetsAt: &reset}},
+	}}
+	got := svc.withAntigravityPoolWindowStats(t.Context(), &Account{ID: 7}, split)
+	require.Len(t, repo.calls, 3, "split pool must not reuse shared-pool cache")
+	require.Equal(t, []string{"gemini"}, repo.calls[1].prefixes)
+	require.Equal(t, []string{"gemini-4-argon"}, repo.calls[1].excluded)
+	require.Equal(t, []string{"gemini-4-argon"}, repo.calls[2].prefixes)
+	require.Empty(t, repo.calls[2].excluded)
+	require.NotNil(t, got.AntigravityPools[1].FiveHour.WindowStats)
+	require.Nil(t, shared.AntigravityPools[0].FiveHour.WindowStats)
+	svc.withAntigravityPoolWindowStats(t.Context(), &Account{ID: 7}, split)
+	require.Len(t, repo.calls, 3)
 }
 
 func TestAntigravityWindowStart(t *testing.T) {

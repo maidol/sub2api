@@ -96,6 +96,20 @@ describe('AntigravityPoolUsage', () => {
     expect(weekly.attributes('title')).toContain('admin.accounts.antigravityPool.idleHint')
   })
 
+  it('Argon 配额使用独立标签，不误标为 Claude/GPT', () => {
+    const wrapper = mountPools([
+      {
+        pool: 'gemini_argon',
+        weekly: { utilization: 20, resets_at: null, remaining_seconds: 0 }
+      }
+    ])
+
+    const weekly = row(wrapper, 'gemini_argon-weekly')
+    expect(weekly.find('span').text()).toBe('admin.accounts.antigravityPool.argon admin.accounts.antigravityPool.weekly')
+    expect(weekly.find('[data-test="used"]').text()).toBe('admin.accounts.antigravityPool.used=20%')
+    expect(wrapper.text()).not.toContain('admin.accounts.antigravityPool.claudeGpt')
+  })
+
   it('两池各自一行本地统计，0 次也显示；周在前、5h 在后', () => {
     const wrapper = mountPools([
       {
