@@ -106,11 +106,11 @@ func TestSchedulerSnapshotFiltersAccountsWithUnavailableProxies(t *testing.T) {
 	expiredAt := now.Add(-time.Minute)
 	expired := &Proxy{ID: proxyID, Status: StatusActive, ExpiresAt: &expiredAt}
 	cache := &proxyGateSnapshotCache{accounts: []*Account{
-		{ID: 1},
-		{ID: 2, ProxyID: &proxyID, Proxy: active},
-		{ID: 3, ProxyID: &proxyID, Proxy: inactive},
-		{ID: 4, ProxyID: &proxyID},
-		{ID: 5, ProxyID: &proxyID, Proxy: expired},
+		{ID: 1, Status: StatusActive, Schedulable: true},
+		{ID: 2, Status: StatusActive, Schedulable: true, ProxyID: &proxyID, Proxy: active},
+		{ID: 3, Status: StatusActive, Schedulable: true, ProxyID: &proxyID, Proxy: inactive},
+		{ID: 4, Status: StatusActive, Schedulable: true, ProxyID: &proxyID},
+		{ID: 5, Status: StatusActive, Schedulable: true, ProxyID: &proxyID, Proxy: expired},
 	}}
 	svc := NewSchedulerSnapshotService(cache, nil, nil, nil, nil)
 

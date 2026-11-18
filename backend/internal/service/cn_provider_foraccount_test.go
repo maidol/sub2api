@@ -129,7 +129,7 @@ func TestCNProviderQuotaService_EmptyTiersAreUnhealthyAndNotPersisted(t *testing
 	require.False(t, result.Success)
 	require.False(t, result.CredentialValid)
 	require.Empty(t, result.Tiers)
-	require.Equal(t, "quota response contained no usable tiers", result.Error)
+	require.Equal(t, "quota response for "+PlatformZhipu+" contains no recognized usage window (upstream schema may have changed); keeping the previous snapshot", result.Error)
 	require.False(t, repo.updateExtraCalled, "empty tiers must not refresh usage_updated_at")
 }
 
